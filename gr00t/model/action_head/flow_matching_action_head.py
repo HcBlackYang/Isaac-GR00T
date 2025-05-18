@@ -88,6 +88,7 @@ class CategorySpecificMLP(nn.Module):
         return self.layer2(hidden, cat_ids)
 
 
+
 class MultiEmbodimentActionEncoder(nn.Module):
     def __init__(self, action_dim, hidden_size, num_embodiments):
         super().__init__()

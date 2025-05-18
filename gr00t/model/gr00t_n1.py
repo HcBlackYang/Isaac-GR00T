@@ -184,13 +184,44 @@ class GR00T_N1(PreTrainedModel):
         backbone_inputs = self.backbone.prepare_input(inputs)
         action_inputs = self.action_head.prepare_input(inputs)
 
+        # def to_device_with_maybe_dtype(x):
+        #     # Only cast to self.compute_dtype if the tensor is floating
+        #     if torch.is_floating_point(x):
+        #         return x.to(self.device, dtype=self.action_head.dtype)
+        #     else:
+        #         # Keep original dtype
+        #         return x.to(self.device)
+
+
+        # 在/root/autodl-tmp/gr00t/Isaac-GR00T/gr00t/model/gr00t_n1.py文件中
         def to_device_with_maybe_dtype(x):
-            # Only cast to self.compute_dtype if the tensor is floating
+            """处理张量和非张量输入"""
+            # 处理非张量类型
+            if not isinstance(x, torch.Tensor):
+                try:
+                    if isinstance(x, (int, float)):
+                        # 转换数值为tensor
+                        return torch.tensor([x], dtype=torch.float32 if isinstance(x, float) else torch.long).to(self.device)
+                    elif isinstance(x, np.ndarray):
+                        # 转换numpy数组为tensor
+                        dtype = torch.float32 if np.issubdtype(x.dtype, np.floating) else torch.long
+                        return torch.tensor(x, dtype=dtype).to(self.device)
+                    elif isinstance(x, (list, tuple)) and all(isinstance(i, (int, float)) for i in x):
+                        # 转换数值列表为tensor
+                        return torch.tensor(x).to(self.device)
+                    else:
+                        # 无法转换的类型，直接返回
+                        print(f"警告: 无法转换类型 {type(x)} 到tensor")
+                        return x
+                except Exception as e:
+                    print(f"警告: 转换到tensor时出错: {e}, 对象类型: {type(x)}")
+                    return x
+            
+            # 处理张量类型
             if torch.is_floating_point(x):
                 return x.to(self.device, dtype=self.action_head.dtype)
-            else:
-                # Keep original dtype
-                return x.to(self.device)
+            return x.to(self.device)
+        
 
         backbone_inputs = tree.map_structure(to_device_with_maybe_dtype, backbone_inputs)
         action_inputs = tree.map_structure(to_device_with_maybe_dtype, action_inputs)

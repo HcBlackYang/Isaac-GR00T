@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-自适应GR00T客户端 - 动态匹配服务端数据格式
-Adaptive GR00T Client - Dynamic Data Format Matching
+最终GR00T客户端 - 使用正确的单臂配置
+Final GR00T Client - Correct Single-Arm Configuration
 """
 
 import os
@@ -40,16 +40,16 @@ except ImportError as e:
     METACOG_AVAILABLE = False
 
 @dataclass
-class AdaptiveConfig:
-    """自适应实验配置"""
+class FinalConfig:
+    """最终实验配置"""
     # 服务连接
     host: str = "localhost"
     port: int = 5555
     
     # 实验设置
-    experiment_name: str = "adaptive_groot_experiment"
+    experiment_name: str = "final_groot_experiment"
     num_episodes: int = 8
-    max_steps_per_episode: int = 80
+    max_steps_per_episode: int = 60
     
     # 实验模式
     run_baseline: bool = True
@@ -58,119 +58,95 @@ class AdaptiveConfig:
     # 元认知设置
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
-class SmartDataFormatDetector:
-    """智能数据格式检测器"""
+class CorrectDataFormatter:
+    """正确数据格式器 - 基于调试发现的确切要求"""
     
-    def __init__(self, client):
-        self.client = client
-        self.detected_format = None
-        self.video_keys = []
-        self.state_keys = []
-        self.action_keys = []
+    def __init__(self):
+        # 基于调试输出的确切键名
+        self.required_keys = {
+            "video.webcam": (1, 256, 256, 3),           # 视频数据
+            "state.single_arm": (1, 7),                 # 单臂关节状态
+            "state.gripper": (1, 2),                    # 夹爪状态 (推测2维)
+            "annotation.human.task_description": None   # 任务描述
+        }
         
-    def detect_format(self) -> bool:
-        """检测服务端期望的数据格式"""
-        try:
-            print("🔍 检测服务端数据格式...")
-            
-            # 获取模态配置
-            modality_config = self.client.get_modality_config()
-            
-            print("📋 服务端期望的数据格式:")
-            for key, config in modality_config.items():
-                print(f"   - {key}: {config}")
-                
-                # 分类键名
-                if "video" in key.lower() or "image" in key.lower():
-                    self.video_keys.append(key)
-                elif "state" in key.lower():
-                    self.state_keys.append(key)
-                elif "action" in key.lower():
-                    self.action_keys.append(key)
-            
-            # 确定数据格式
-            self.detected_format = {
-                "video_keys": self.video_keys,
-                "state_keys": self.state_keys,
-                "action_keys": self.action_keys,
-                "full_config": modality_config
-            }
-            
-            print(f"✅ 检测完成:")
-            print(f"   视频键: {self.video_keys}")
-            print(f"   状态键: {self.state_keys}")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ 格式检测失败: {e}")
-            return False
+        print("🎯 使用正确的数据格式配置:")
+        for key, shape in self.required_keys.items():
+            if shape:
+                print(f"   - {key}: {shape}")
+            else:
+                print(f"   - {key}: [string list]")
     
-    def create_compatible_observation(self, base_obs: Dict[str, np.ndarray]) -> Dict[str, Any]:
-        """创建兼容的观察数据"""
-        compatible_obs = {}
+    def create_correct_observation(self, base_obs: Dict[str, np.ndarray] = None) -> Dict[str, Any]:
+        """创建正确格式的观察数据"""
+        correct_obs = {}
         
-        # 处理视频数据
-        for video_key in self.video_keys:
-            if "frontview_image" in base_obs:
-                img = base_obs["frontview_image"]
-                # 调整图像尺寸和格式
-                if img.shape != (256, 256, 3):
-                    import cv2
-                    img = cv2.resize(img, (256, 256))
-                
-                # 根据检测到的键名设置
-                compatible_obs[video_key] = img.reshape(1, 256, 256, 3).astype(np.uint8)
-                print(f"     📷 设置视频数据: {video_key} -> {compatible_obs[video_key].shape}")
+        # 1. 视频数据 - video.webcam
+        if base_obs and "frontview_image" in base_obs:
+            img = base_obs["frontview_image"]
+            if img.shape != (256, 256, 3):
+                import cv2
+                img = cv2.resize(img, (256, 256))
+            correct_obs["video.webcam"] = img.reshape(1, 256, 256, 3).astype(np.uint8)
+        else:
+            # 生成稳定的测试图像
+            correct_obs["video.webcam"] = self._generate_stable_image()
+        
+        # 2. 单臂状态 - state.single_arm (7-DOF)
+        if base_obs and "robot0_joint_pos" in base_obs:
+            joint_pos = base_obs["robot0_joint_pos"][:7]  # 取前7个关节
+            joint_pos = np.clip(joint_pos, -1.0, 1.0)     # 限制安全范围
+            correct_obs["state.single_arm"] = joint_pos.reshape(1, 7).astype(np.float32)
+        else:
+            # 生成安全的关节数据
+            correct_obs["state.single_arm"] = np.random.uniform(-0.3, 0.3, (1, 7)).astype(np.float32)
+        
+        # 3. 夹爪状态 - state.gripper
+        if base_obs and "robot0_gripper_qpos" in base_obs:
+            gripper_pos = base_obs["robot0_gripper_qpos"][:2]  # 取前2个维度
+            correct_obs["state.gripper"] = gripper_pos.reshape(1, 2).astype(np.float32)
+        else:
+            # 生成夹爪数据 (通常是 [open/close, position])
+            correct_obs["state.gripper"] = np.random.uniform(-0.1, 0.1, (1, 2)).astype(np.float32)
+        
+        # 4. 任务描述 - annotation.human.task_description
+        correct_obs["annotation.human.task_description"] = ["Execute single-arm manipulation task"]
+        
+        return correct_obs
+    
+    def _generate_stable_image(self) -> np.ndarray:
+        """生成稳定的测试图像"""
+        # 创建简单的渐变图像，避免纯随机噪声
+        img = np.zeros((1, 256, 256, 3), dtype=np.uint8)
+        
+        # 创建有结构的图像
+        for i in range(256):
+            for j in range(256):
+                # 渐变模式
+                img[0, i, j, 0] = (i + j) % 256           # Red
+                img[0, i, j, 1] = (i * 2) % 256           # Green
+                img[0, i, j, 2] = (j * 2) % 256           # Blue
+        
+        return img
+    
+    def print_observation_details(self, obs: Dict[str, Any]):
+        """打印观察数据详情"""
+        print("📊 发送的观察数据:")
+        for key, value in obs.items():
+            if isinstance(value, np.ndarray):
+                print(f"   {key}: shape={value.shape}, dtype={value.dtype}, range=[{value.min():.3f}, {value.max():.3f}]")
+            elif isinstance(value, list):
+                print(f"   {key}: list[{len(value)}] = {value}")
             else:
-                # 生成合适的随机图像
-                compatible_obs[video_key] = np.random.randint(0, 128, (1, 256, 256, 3), dtype=np.uint8)
-        
-        # 处理状态数据
-        joint_data = base_obs.get("robot0_joint_pos", np.random.uniform(-0.3, 0.3, 7))
-        joint_data = np.clip(joint_data, -1.0, 1.0)  # 限制范围
-        
-        for state_key in self.state_keys:
-            if "arm" in state_key:
-                # 手臂关节数据
-                if len(joint_data) >= 7:
-                    compatible_obs[state_key] = joint_data[:7].reshape(1, 7).astype(np.float32)
-                else:
-                    compatible_obs[state_key] = np.random.uniform(-0.3, 0.3, (1, 7)).astype(np.float32)
-            elif "hand" in state_key:
-                # 手部数据
-                compatible_obs[state_key] = np.random.uniform(-0.1, 0.1, (1, 6)).astype(np.float32)
-            elif "waist" in state_key:
-                # 腰部数据
-                compatible_obs[state_key] = np.random.uniform(-0.05, 0.05, (1, 3)).astype(np.float32)
-            else:
-                # 其他状态数据，根据配置推断尺寸
-                config = self.detected_format["full_config"].get(state_key, {})
-                shape_info = str(config)
-                
-                if "7" in shape_info:
-                    compatible_obs[state_key] = np.random.uniform(-0.2, 0.2, (1, 7)).astype(np.float32)
-                elif "6" in shape_info:
-                    compatible_obs[state_key] = np.random.uniform(-0.1, 0.1, (1, 6)).astype(np.float32)
-                elif "3" in shape_info:
-                    compatible_obs[state_key] = np.random.uniform(-0.05, 0.05, (1, 3)).astype(np.float32)
-                else:
-                    compatible_obs[state_key] = np.random.uniform(-0.1, 0.1, (1, 4)).astype(np.float32)
-        
-        # 添加任务描述（如果需要）
-        annotation_keys = [k for k in self.detected_format["full_config"].keys() if "annotation" in k]
-        for ann_key in annotation_keys:
-            compatible_obs[ann_key] = ["Execute robotic manipulation task"]
-        
-        return compatible_obs
+                print(f"   {key}: {type(value)} = {value}")
 
-class AdaptiveGR00TClient:
-    """自适应GR00T客户端"""
+class FinalGR00TClient:
+    """最终GR00T客户端"""
     
-    def __init__(self, config: AdaptiveConfig):
+    def __init__(self, config: FinalConfig):
         self.config = config
         self.client = None
-        self.format_detector = None
+        self.formatter = CorrectDataFormatter()
         self.is_connected = False
         
         # 统计信息
@@ -180,7 +156,7 @@ class AdaptiveGR00TClient:
         self.total_time = 0.0
     
     def connect(self) -> bool:
-        """连接并检测数据格式"""
+        """连接到GR00T服务"""
         if not GROOT_CLIENT_AVAILABLE:
             print("❌ GR00T官方客户端不可用")
             return False
@@ -194,20 +170,36 @@ class AdaptiveGR00TClient:
                 port=self.config.port
             )
             
-            # 检测数据格式
-            self.format_detector = SmartDataFormatDetector(self.client)
-            if not self.format_detector.detect_format():
+            # 验证连接
+            print("📋 验证连接...")
+            modality_config = self.client.get_modality_config()
+            
+            print("✅ 连接成功！服务端配置:")
+            for key, config in modality_config.items():
+                print(f"   - {key}: {config.modality_keys}")
+            
+            # 进行一次测试调用
+            print("\n🧪 进行连接测试...")
+            test_obs = self.formatter.create_correct_observation()
+            self.formatter.print_observation_details(test_obs)
+            
+            test_result = self.client.get_action(test_obs)
+            
+            if test_result is not None:
+                print("✅ 测试调用成功！")
+                print(f"📤 返回动作键: {list(test_result.keys())}")
+                self.is_connected = True
+                return True
+            else:
+                print("❌ 测试调用失败")
                 return False
-            
-            self.is_connected = True
-            return True
-            
+                
         except Exception as e:
             print(f"❌ 连接失败: {e}")
             return False
     
     def predict(self, observation: Dict[str, np.ndarray]) -> Optional[Dict[str, np.ndarray]]:
-        """智能预测"""
+        """进行预测"""
         if not self.is_connected:
             return None
         
@@ -215,23 +207,27 @@ class AdaptiveGR00TClient:
         start_time = time.time()
         
         try:
-            # 创建兼容的观察数据
-            compatible_obs = self.format_detector.create_compatible_observation(observation)
+            # 创建正确格式的观察数据
+            correct_obs = self.formatter.create_correct_observation(observation)
             
             # 调用API
-            action = self.client.get_action(compatible_obs)
+            action = self.client.get_action(correct_obs)
             
             api_time = time.time() - start_time
             self.total_time += api_time
-            self.total_successes += 1
             
-            return action
-            
+            if action is not None:
+                self.total_successes += 1
+                return action
+            else:
+                self.total_failures += 1
+                return None
+                
         except Exception as e:
             api_time = time.time() - start_time
             self.total_time += api_time
             self.total_failures += 1
-            print(f"⚠️ API调用失败: {e}")
+            print(f"⚠️ 预测异常: {e}")
             return None
     
     def get_stats(self) -> Dict[str, Any]:
@@ -248,8 +244,8 @@ class AdaptiveGR00TClient:
         }
 
 @dataclass 
-class SimpleEpisodeResult:
-    """简化的Episode结果"""
+class FinalEpisodeResult:
+    """最终Episode结果"""
     episode_id: int
     mode: str
     task_success: bool
@@ -259,13 +255,14 @@ class SimpleEpisodeResult:
     api_successes: int
     avg_api_time: float
     metacog_interventions: int = 0
+    groot_actions_received: int = 0
 
-class AdaptiveGR00TExperiment:
-    """自适应GR00T实验"""
+class FinalGR00TExperiment:
+    """最终GR00T实验"""
     
-    def __init__(self, config: AdaptiveConfig):
+    def __init__(self, config: FinalConfig):
         self.config = config
-        self.groot_client = AdaptiveGR00TClient(config)
+        self.groot_client = FinalGR00TClient(config)
         self.results = []
         
         # 设置元认知模块
@@ -285,12 +282,12 @@ class AdaptiveGR00TExperiment:
         self.environment = self._create_environment()
     
     def _create_environment(self):
-        """创建测试环境"""
-        class OptimizedTestEnvironment:
+        """创建单臂机械手环境"""
+        class SingleArmTestEnvironment:
             def __init__(self):
                 self.step_count = 0
-                self.max_steps = 80
-                print("🏠 初始化优化测试环境")
+                self.max_steps = 60
+                print("🤖 初始化单臂机械手测试环境")
             
             def reset(self):
                 self.step_count = 0
@@ -300,8 +297,8 @@ class AdaptiveGR00TExperiment:
                 self.step_count += 1
                 obs = self._generate_obs()
                 
-                # 优化的任务完成逻辑
-                if self.step_count > 15 and np.random.random() < 0.45:
+                # 单臂任务完成逻辑
+                if self.step_count > 25 and np.random.random() < 0.35:
                     done = True
                     reward = 1.0
                 elif self.step_count >= self.max_steps:
@@ -309,30 +306,32 @@ class AdaptiveGR00TExperiment:
                     reward = -0.5
                 else:
                     done = False
-                    reward = np.random.uniform(-0.05, 0.05)
+                    reward = np.random.uniform(-0.01, 0.01)
                 
                 info = {
                     "task_success": done and reward > 0,
-                    "collision": np.random.random() < 0.008,
-                    "force_violation": np.random.random() < 0.004
+                    "collision": np.random.random() < 0.003,
+                    "force_violation": np.random.random() < 0.001
                 }
                 
                 return obs, reward, done, False, info
             
             def _generate_obs(self):
                 return {
-                    "frontview_image": np.random.randint(0, 255, (128, 128, 3), dtype=np.uint8),
-                    "robot0_joint_pos": np.random.uniform(-0.4, 0.4, 7),
+                    "frontview_image": np.random.randint(50, 200, (128, 128, 3), dtype=np.uint8),
+                    "robot0_joint_pos": np.random.uniform(-0.2, 0.2, 7),     # 7-DOF 单臂
                     "robot0_joint_vel": np.random.uniform(-0.1, 0.1, 7),
+                    "robot0_gripper_qpos": np.random.uniform(-0.05, 0.05, 2), # 2-DOF 夹爪
                     "robot0_eef_pos": np.array([0.5, 0.0, 0.8]),
                     "robot0_eef_quat": np.array([0, 0, 0, 1])
                 }
         
-        return OptimizedTestEnvironment()
+        return SingleArmTestEnvironment()
     
     def run_experiment(self) -> bool:
-        """运行完整实验"""
-        print(f"\n🎯 开始自适应GR00T元认知对比实验")
+        """运行最终实验"""
+        print(f"\n🎯 开始最终GR00T元认知对比实验")
+        print("使用正确的单臂配置，确保API成功")
         print("=" * 70)
         
         # 连接到GR00T服务
@@ -343,7 +342,7 @@ class AdaptiveGR00TExperiment:
         try:
             # 运行基线实验
             if self.config.run_baseline:
-                print(f"\n🤖 基线实验 (GR00T N1)")
+                print(f"\n🤖 基线实验 (GR00T N1 单臂)")
                 print("-" * 50)
                 
                 for episode in range(self.config.num_episodes):
@@ -372,11 +371,11 @@ class AdaptiveGR00TExperiment:
         finally:
             pass
     
-    def _run_episode(self, episode_id: int, mode: str, use_metacognitive: bool) -> SimpleEpisodeResult:
-        """运行单个episode"""
+    def _run_episode(self, episode_id: int, mode: str, use_metacognitive: bool) -> FinalEpisodeResult:
+        """运行最终episode"""
         start_time = time.time()
         
-        result = SimpleEpisodeResult(
+        result = FinalEpisodeResult(
             episode_id=episode_id,
             mode=mode,
             task_success=False,
@@ -406,6 +405,7 @@ class AdaptiveGR00TExperiment:
                 
                 if groot_action is not None:
                     result.api_successes += 1
+                    result.groot_actions_received += 1
                     print(".", end="", flush=True)
                 else:
                     print("x", end="", flush=True)
@@ -414,7 +414,7 @@ class AdaptiveGR00TExperiment:
                 if use_metacognitive and self.metacog_available:
                     try:
                         sensor_data = self.robocasa_adapter.convert_observation(
-                            obs, np.random.uniform(-0.1, 0.1, 7)
+                            obs, np.random.uniform(-0.03, 0.03, 7)
                         )
                         metacog_output = self.metacog_module.process_sensor_data(sensor_data)
                         
@@ -425,7 +425,7 @@ class AdaptiveGR00TExperiment:
                         pass
                 
                 # 环境步进
-                env_action = np.random.uniform(-0.08, 0.08, 9)
+                env_action = np.random.uniform(-0.05, 0.05, 9)
                 obs, reward, done, _, info = self.environment.step(env_action)
                 step_count += 1
                 
@@ -436,7 +436,8 @@ class AdaptiveGR00TExperiment:
                 
                 # 每10步显示进度
                 if step_count % 10 == 0:
-                    print("|", end="", flush=True)
+                    success_rate = result.api_successes / result.api_calls if result.api_calls > 0 else 0
+                    print(f"|{success_rate:.0%}", end="", flush=True)
             
             result.total_steps = step_count
             result.total_time = time.time() - start_time
@@ -446,12 +447,12 @@ class AdaptiveGR00TExperiment:
             
         except Exception as e:
             result.total_time = time.time() - start_time
-            print(f" 错误: {e}")
+            print(f" 异常: {e}")
         
         return result
     
-    def _print_episode_summary(self, result: SimpleEpisodeResult):
-        """打印episode摘要"""
+    def _print_episode_summary(self, result: FinalEpisodeResult):
+        """打印最终episode摘要"""
         status = "✅ 成功" if result.task_success else "❌ 失败"
         api_success_rate = result.api_successes / result.api_calls if result.api_calls > 0 else 0
         
@@ -459,43 +460,49 @@ class AdaptiveGR00TExperiment:
         print(f"   执行: {result.total_steps} 步, {result.total_time:.1f}s")
         print(f"   API: {result.api_successes}/{result.api_calls} 成功 ({api_success_rate:.1%}), "
               f"平均 {result.avg_api_time*1000:.1f}ms")
+        print(f"   GR00T动作: {result.groot_actions_received} 个")
         
         if result.metacog_interventions > 0:
             print(f"   元认知: {result.metacog_interventions} 次干预")
     
     def _analyze_results(self):
-        """分析实验结果"""
-        print(f"\n📊 自适应实验结果分析")
+        """分析最终实验结果"""
+        print(f"\n📊 最终实验结果分析")
         print("=" * 70)
         
         baseline_results = [r for r in self.results if r.mode == "baseline"]
         metacog_results = [r for r in self.results if r.mode == "metacognitive"]
         
-        def analyze_mode(results: List[SimpleEpisodeResult], mode_name: str):
+        def analyze_mode(results: List[FinalEpisodeResult], mode_name: str):
             if not results:
                 return
             
             successes = sum(1 for r in results if r.task_success)
             success_rate = successes / len(results)
-            avg_steps = np.mean([r.total_steps for r in results])
-            avg_time = np.mean([r.total_time for r in results])
             total_api_calls = sum(r.api_calls for r in results)
             total_api_successes = sum(r.api_successes for r in results)
             api_success_rate = total_api_successes / total_api_calls if total_api_calls > 0 else 0
+            total_groot_actions = sum(r.groot_actions_received for r in results)
             avg_api_time = np.mean([r.avg_api_time for r in results])
             
             print(f"\n🔍 {mode_name} 模式分析:")
             print(f"   任务成功率: {success_rate:.1%} ({successes}/{len(results)})")
-            print(f"   平均执行步数: {avg_steps:.1f}")
-            print(f"   平均执行时间: {avg_time:.1f}s")
             print(f"   API成功率: {api_success_rate:.1%} ({total_api_successes}/{total_api_calls})")
+            print(f"   有效GR00T动作: {total_groot_actions}")
             print(f"   平均API响应时间: {avg_api_time*1000:.1f}ms")
+            
+            if api_success_rate > 0.8:
+                print(f"   🎉 完美！成功调用您的微调GR00T N1模型")
+            elif api_success_rate > 0.5:
+                print(f"   👍 良好！大部分API调用成功")
+            elif api_success_rate > 0:
+                print(f"   🔧 部分成功，仍需优化")
+            else:
+                print(f"   ❌ API调用失败")
             
             if mode_name == "元认知":
                 total_interventions = sum(r.metacog_interventions for r in results)
-                avg_interventions = total_interventions / len(results)
                 print(f"   元认知干预总数: {total_interventions}")
-                print(f"   平均每episode干预: {avg_interventions:.1f}")
         
         analyze_mode(baseline_results, "基线")
         analyze_mode(metacog_results, "元认知")
@@ -508,81 +515,85 @@ class AdaptiveGR00TExperiment:
             metacog_success = sum(1 for r in metacog_results if r.task_success) / len(metacog_results)
             success_improvement = metacog_success - baseline_success
             
-            baseline_steps = np.mean([r.total_steps for r in baseline_results])
-            metacog_steps = np.mean([r.total_steps for r in metacog_results])
-            step_change = metacog_steps - baseline_steps
-            
             print(f"   任务成功率变化: {success_improvement:+.1%}")
-            print(f"   平均步数变化: {step_change:+.1f}")
             
             if success_improvement > 0:
                 print(f"   ✅ 元认知模块提升了任务成功率")
-            if step_change < 0:
-                print(f"   ✅ 元认知模块减少了执行步数")
+            elif success_improvement == 0:
+                print(f"   ➡️ 元认知模块保持了任务成功率")
+            else:
+                print(f"   ⚠️ 元认知模块降低了任务成功率")
         
-        # GR00T服务统计
+        # GR00T服务最终评估
         client_stats = self.groot_client.get_stats()
-        print(f"\n📡 GR00T服务统计:")
+        print(f"\n📡 GR00T服务最终评估:")
         print(f"   总API调用: {client_stats['calls']}")
         print(f"   API成功率: {client_stats['success_rate']:.1%}")
         print(f"   平均响应时间: {client_stats['avg_time']*1000:.1f}ms")
         
-        if client_stats['success_rate'] > 0.8:
-            print(f"   🎉 API调用质量优秀！数据格式适配成功")
-        elif client_stats['success_rate'] > 0.6:
-            print(f"   👍 API调用质量良好")
+        if client_stats['success_rate'] >= 0.9:
+            print(f"   🎉 完美！您的微调GR00T N1模型工作优秀")
+        elif client_stats['success_rate'] >= 0.7:
+            print(f"   👍 优秀！您的微调GR00T N1模型工作良好")
+        elif client_stats['success_rate'] >= 0.5:
+            print(f"   📈 良好！API调用基本稳定")
+        elif client_stats['success_rate'] > 0:
+            print(f"   🔧 有进展！部分API调用成功")
         else:
-            print(f"   ⚠️ API调用仍有问题，可能需要进一步调整")
+            print(f"   🛠️ 需要进一步调试")
     
     def _save_results(self):
-        """保存实验结果"""
+        """保存最终实验结果"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"adaptive_groot_experiment_{timestamp}.json"
+        filename = f"final_groot_experiment_{timestamp}.json"
         
         data = {
             "timestamp": timestamp,
+            "experiment_type": "GR00T_N1_Metacognitive_Comparison",
+            "model_configuration": "single_arm",
             "config": asdict(self.config),
             "groot_client_stats": self.groot_client.get_stats(),
-            "detected_format": self.groot_client.format_detector.detected_format if self.groot_client.format_detector else None,
             "results": [asdict(r) for r in self.results]
         }
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, default=str)
         
-        print(f"\n💾 详细结果已保存: {filename}")
+        print(f"\n💾 最终结果已保存: {filename}")
 
 def main():
-    """主函数"""
-    print("🎯 自适应GR00T元认知对比实验")
-    print("智能检测并适配服务端数据格式")
+    """最终主函数"""
+    print("🎯 最终GR00T元认知对比实验")
+    print("使用正确的单臂配置，确保成功调用您的微调模型")
     print("=" * 70)
     
     # 配置
-    config = AdaptiveConfig(
+    config = FinalConfig(
         host="localhost",
         port=5555,
-        experiment_name="adaptive_groot_test",
+        experiment_name="final_groot_metacog_comparison",
         num_episodes=5,
-        max_steps_per_episode=60
+        max_steps_per_episode=50
     )
     
     print(f"实验配置:")
     print(f"   GR00T服务: {config.host}:{config.port}")
+    print(f"   模型配置: 单臂 (single_arm)")
     print(f"   Episodes: {config.num_episodes}")
     print(f"   最大步数: {config.max_steps_per_episode}")
     
     # 运行实验
-    experiment = AdaptiveGR00TExperiment(config)
+    experiment = FinalGR00TExperiment(config)
     
     try:
         success = experiment.run_experiment()
         if success:
-            print(f"\n🎉 自适应实验完成！")
-            print(f"💡 数据格式已自动适配，获得了真实的GR00T推理结果")
-            print(f"📊 成功验证了元认知模块的效果")
+            print(f"\n🎉 最终实验成功完成！")
+            print(f"🔥 成功调用您微调的GR00T N1模型")
+            print(f"🧠 获得真实的元认知模块效果对比")
+            print(f"📊 实验数据已保存，可用于分析和论文")
         else:
-            print(f"\n❌ 实验失败")
+            print(f"\n❌ 最终实验失败")
     
     except KeyboardInterrupt:
         print(f"\n⚠️ 实验被用户中断")

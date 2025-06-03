@@ -16,7 +16,14 @@
 from enum import Enum
 from typing import Optional
 
-from numpydantic import NDArray
+# from numpydantic import NDArray
+
+
+from numpy.typing import NDArray
+import numpy as np
+from typing import Any
+
+
 from pydantic import BaseModel, Field, field_serializer
 
 from .embodiment_tags import EmbodimentTag
@@ -170,17 +177,46 @@ class LeRobotModalityMetadata(BaseModel):
 # Dataset schema (parsed from LeRobot schema and simplified)
 
 
+# class DatasetStatisticalValues(BaseModel):
+#     max: NDArray = Field(..., description="Maximum values")
+#     min: NDArray = Field(..., description="Minimum values")
+#     mean: NDArray = Field(..., description="Mean values")
+#     std: NDArray = Field(..., description="Standard deviation")
+#     q01: NDArray = Field(..., description="1st percentile values")
+#     q99: NDArray = Field(..., description="99th percentile values")
+
+#     @field_serializer("*", when_used="json")
+#     def serialize_ndarray(self, v: NDArray) -> list[float]:
+#         return v.tolist()  # type: ignore
+
+
+from pydantic import field_validator
+
 class DatasetStatisticalValues(BaseModel):
-    max: NDArray = Field(..., description="Maximum values")
-    min: NDArray = Field(..., description="Minimum values")
-    mean: NDArray = Field(..., description="Mean values")
-    std: NDArray = Field(..., description="Standard deviation")
-    q01: NDArray = Field(..., description="1st percentile values")
-    q99: NDArray = Field(..., description="99th percentile values")
+    max: NDArray[np.float32]
+    min: NDArray[np.float32]
+    mean: NDArray[np.float32]
+    std: NDArray[np.float32]
+    q01: NDArray[np.float32]
+    q99: NDArray[np.float32]
+
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
+
+    @field_validator("max", "min", "mean", "std", "q01", "q99", mode="before")
+    @classmethod
+    def convert_list_to_array(cls, v):
+        if isinstance(v, list):
+            return np.array(v, dtype=np.float32)
+        return v
 
     @field_serializer("*", when_used="json")
-    def serialize_ndarray(self, v: NDArray) -> list[float]:
-        return v.tolist()  # type: ignore
+    def serialize_ndarray(self, v: NDArray[np.float32], _info) -> list[float]:
+        return v.tolist()
+
+
+
 
 
 class DatasetStatistics(BaseModel):

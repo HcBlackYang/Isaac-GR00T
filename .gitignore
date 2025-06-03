@@ -124,3 +124,7 @@ tmp/
 output/
 
 /so100-finetune/
+
+metacognitive_experiment_20250602_180013.json
+
+test_metacog_model.pth

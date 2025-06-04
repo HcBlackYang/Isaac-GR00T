@@ -124,7 +124,7 @@ class ForceEncoder(nn.Module):
 
 class ProprioceptiveEncoder(nn.Module):
     """本体感觉编码器"""
-    def __init__(self, joint_dim=7, pose_dim=7, hidden_dim=128):
+    def __init__(self, joint_dim=5, pose_dim=7, hidden_dim=128):
         super().__init__()
         self.joint_encoder = nn.Linear(joint_dim * 2, hidden_dim // 2)
         self.pose_encoder = nn.Linear(pose_dim, hidden_dim // 2)
@@ -873,6 +873,130 @@ def test_complete_metacognitive_module():
     print("✅ 模型保存测试通过")
     
     return True
+
+
+# ==================== 元认知输出到VLA System2的适配器 ====================
+
+class MetacogToVLASystem2Adapter:
+    """将元认知模块的输出转换为给VLA System2的简练指令"""
+
+    def __init__(self):
+        # 预定义一些关键词和短语，用于从reasoning中提取信息
+        self.force_keywords = ["力", "force", "接触", "contact", "夹持", "grasp"]
+        self.position_keywords = ["位置", "pose", "手臂", "arm", "姿态", "orientation"]
+        self.speed_keywords = ["速度", "speed", "移动", "move"]
+        self.visual_keywords = ["视觉", "visual", "图像", "image", "遮挡", "occlusion", "光照", "lighting"]
+
+        # 更多关键词可以根据reasoning的内容添加
+        self.increase_keywords = ["加大", "增加", "提高", "增强", "increase", "enhance", "raise"]
+        self.decrease_keywords = ["减小", "降低", "减弱", "decrease", "reduce", "lower"]
+
+
+    def _extract_adjustment_detail(self, reasoning_text: str, param_value: Optional[float],
+                                   keywords: List[str], positive_verb: str, negative_verb: str,
+                                   threshold: Optional[float] = None) -> Optional[str]:
+        """辅助函数，用于从reasoning和parameters中提取调整细节"""
+        reasoning_lower = reasoning_text.lower()
+        found_keyword = any(kw in reasoning_lower for kw in keywords)
+
+        if not found_keyword and param_value is None:
+            return None
+
+        # 优先基于参数值（如果提供阈值）
+        if param_value is not None and threshold is not None:
+            if param_value < threshold:
+                return negative_verb
+            else: # >= threshold
+                return positive_verb # 或者是一个中性/增强的词
+
+        # 如果没有参数或阈值，或参数不适用，则尝试从reasoning文本中判断
+        if found_keyword:
+            if any(kw in reasoning_lower for kw in self.increase_keywords):
+                return positive_verb
+            if any(kw in reasoning_lower for kw in self.decrease_keywords):
+                return negative_verb
+            # 如果只找到核心关键词但没有明确增减，可以返回一个通用提示或None
+            # return f"检查{keywords[0]}" # 例如
+        return None
+
+
+    def convert_to_system2_instruction(self, metacog_output: MetaCognitiveOutput) -> Optional[str]:
+        directive = metacog_output.directive
+        # 使用CoT的"推理"部分作为语义反馈的来源，它通常更具分析性
+        # 您代码中 MetaCognitiveOutput.reasoning 取的是CoT的倒数第二部分，即"决策"
+        # 这里我们假设CoT链条是："观察 -> 分析 -> 推理 -> 决策 -> 预测"
+        # 如果 metacog_output.reasoning 已经是CoT的"推理"部分，则无需修改
+        # 否则，您可能需要一种方式从完整的CoT链条中提取"推理"部分
+        # 为了演示，我们假设 metacog_output.reasoning 已经是我们想要的文本
+        reasoning_text = metacog_output.reasoning
+        params = metacog_output.parameters
+
+        core_instruction = ""
+        adjustment_details = []
+
+        # 1. 确定核心指令
+        if directive == DirectiveType.RETRY:
+            core_instruction = "任务异常，建议重新执行" # 可以根据reasoning细化"任务异常"的原因
+            # 尝试从reasoning中提取失败原因的关键词
+            if any(kw in reasoning_text.lower() for kw in self.visual_keywords):
+                core_instruction = "视觉感知问题，建议重新执行"
+            elif any(kw in reasoning_text.lower() for kw in self.force_keywords):
+                core_instruction = "力反馈异常，建议重新执行"
+
+        elif directive == DirectiveType.ADJUST:
+            core_instruction = "建议调整当前策略"
+
+        elif directive == DirectiveType.ABORT:
+            return "检测到高风险，建议中止当前任务" # 中止指令通常比较直接
+
+        elif directive == DirectiveType.SWITCH_MODE:
+            # 从reasoning中提取要切换到的模式
+            if "力" in reasoning_text or "force" in reasoning_text:
+                core_instruction = "建议切换到力控模式"
+            elif "视觉" in reasoning_text or "visual" in reasoning_text:
+                 core_instruction = "建议切换到视觉伺服模式"
+            else:
+                core_instruction = "建议切换操作模式"
+
+
+        elif directive == DirectiveType.CONTINUE:
+            return None # 无需反馈指令
+        else:
+            return None # 其他未处理的指令
+
+        # 2. 提取调整细节 (主要针对ADJUST和RETRY)
+        if directive == DirectiveType.ADJUST or directive == DirectiveType.RETRY:
+            # 力矩调整
+            force_adj = self._extract_adjustment_detail(
+                reasoning_text, params.get("force_limit"), self.force_keywords,
+                "适当增大力矩", "适当减小力矩", threshold=0.7 # 假设参数值是归一化的
+            )
+            if force_adj: adjustment_details.append(force_adj)
+
+            # 位置/姿态调整
+            # 这个比较复杂，需要更精细的reasoning解析或更结构化的parameters
+            # 简单示例：
+            if "手臂" in reasoning_text and "提高" in reasoning_text:
+                adjustment_details.append("将手臂的位置适当提高")
+            elif "手臂" in reasoning_text and "降低" in reasoning_text:
+                adjustment_details.append("将手臂的位置适当降低")
+
+            # 速度调整
+            speed_adj = self._extract_adjustment_detail(
+                reasoning_text, params.get("approach_speed"), self.speed_keywords,
+                "适当加快速度", "适当减慢速度", threshold=0.6 # 假设参数值是归一化的
+            )
+            if speed_adj: adjustment_details.append(speed_adj)
+
+        # 3. 组合指令
+        if not core_instruction: # 如果没有核心指令（例如，CONTINUE已经被过滤）
+            return None
+
+        if adjustment_details:
+            return f"{core_instruction}：{'，'.join(adjustment_details)}"
+        else:
+            return core_instruction
+
 
 if __name__ == "__main__":
     # 运行测试

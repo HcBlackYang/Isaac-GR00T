@@ -2106,378 +2106,864 @@ class SimpleActionProcessor:
 
 # ==================== 增强草莓环境 - 集成元认知 ====================
 
+# class EnhancedStrawberryEnvironment:
+#     """增强草莓环境 - 基于可工作的StableStrawberryEnvironment + 元认知集成"""
+    
+#     def __init__(self, 
+#                  so100_xml_path: str = None,
+#                  horizon: int = 100,
+#                  enable_gui: bool = False,
+#                  robot: str = "Panda",
+#                  enable_metacognitive: bool = True,
+#                  device: str = "cuda" if torch.cuda.is_available() else "cpu"):
+#         """
+#         初始化增强草莓环境
+        
+#         Args:
+#             so100_xml_path: SO100 XML路径
+#             horizon: 最大步数
+#             enable_gui: 是否启用GUI
+#             robot: 机器人类型
+#             enable_metacognitive: 是否启用元认知模块
+#             device: 设备类型
+#         """
+#         if not ROBOSUITE_AVAILABLE:
+#             raise ImportError("RoboSuite不可用")
+        
+#         self.horizon = horizon
+#         self.so100_xml_path = so100_xml_path
+#         self.enable_gui = enable_gui
+#         self.robot = robot
+#         self.enable_metacognitive = enable_metacognitive and METACOG_AVAILABLE
+#         self.device = device
+        
+#         # 环境状态
+#         self.env = None
+#         self.current_step = 0
+        
+#         # 草莓任务状态
+#         self.strawberry_positions = np.array([
+#             [0.6, 0.1, 0.82],   
+#             [0.7, 0.15, 0.82],  
+#             [0.8, 0.1, 0.82]    
+#         ])
+#         self.plate_position = np.array([0.5, -0.2, 0.81])
+#         self.strawberry_states = [True, True, True]
+#         self.strawberry_on_plate = [False, False, False]
+        
+#         # 统计
+#         self.strawberries_picked = 0
+#         self.strawberries_on_plate = 0
+#         self.total_reward = 0.0
+#         self.metacog_interventions = 0
+#         self.sensor_failures = 0
+        
+#         # 动作处理器
+#         self.action_processor = SimpleActionProcessor()
+        
+#         print(f"🍓 创建增强草莓环境")
+#         print(f"   机器人: {robot}")
+#         print(f"   GUI: {'启用' if enable_gui else '禁用 (避免崩溃)'}")
+#         print(f"   最大步数: {horizon}")
+#         print(f"   元认知模块: {'启用' if self.enable_metacognitive else '禁用'}")
+#         print(f"   设备: {device}")
+        
+#         # 初始化元认知模块
+#         if self.enable_metacognitive:
+#             self._init_metacognitive_modules()
+        
+#         # 创建环境
+#         self._create_stable_environment()
+    
+#     def _init_metacognitive_modules(self):
+#         """初始化元认知模块"""
+#         try:
+#             print("🧠 初始化元认知模块...")
+            
+#             self.metacog_module = CompleteMetaCognitiveModule(self.device)
+#             self.robocasa_adapter = RoboCasaToMetacogAdapter(image_size=(224, 224))  # 使用标准适配器
+#             self.metacog_to_vla_adapter = MetacogToVLASystem2Adapter()
+#             self.action_adjuster = ActionAdjuster()
+            
+#             print("✅ 元认知模块初始化成功")
+            
+#         except Exception as e:
+#             print(f"❌ 元认知模块初始化失败: {e}")
+#             self.enable_metacognitive = False
+    
+#     def _create_stable_environment(self):
+#         """创建稳定环境 - 使用最简单的配置"""
+#         try:
+#             print("🏗️ 创建稳定环境...")
+            
+#             # 最简单的配置 - 避免复杂参数
+#             config = {
+#                 "env_name": "PnPCounterToCab",
+#                 "robots": self.robot,
+#                 "controller_configs": load_composite_controller_config(robot=self.robot),
+#             }
+            
+#             print(f"   使用机器人: {self.robot}")
+#             print(f"   控制器: 已加载")
+            
+#             # 非常保守的环境配置
+#             self.env = robosuite.make(
+#                 **config,
+#                 has_renderer=False,  # 强制关闭渲染器避免崩溃
+#                 has_offscreen_renderer=True,  # 保持离屏渲染
+#                 render_camera=None,
+#                 ignore_done=True,
+#                 use_camera_obs=True,
+#                 control_freq=20,
+#                 camera_names=["robot0_eye_in_hand"],  # 只使用一个相机
+#                 camera_heights=480,
+#                 camera_widths=640,
+#                 initialization_noise=None,  # 关闭噪声
+#             )
+            
+#             print("✅ 稳定环境创建成功")
+            
+#             # 简单验证
+#             if hasattr(self.env, 'action_space'):
+#                 print(f"   动作空间: {getattr(self.env.action_space, 'shape', 'Unknown')}")
+            
+#             print("🎉 稳定环境初始化完成！")
+            
+#         except Exception as e:
+#             print(f"❌ 环境创建失败: {e}")
+#             import traceback
+#             traceback.print_exc()
+#             raise
+    
+#     def reset(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+#         """重置环境"""
+#         try:
+#             print("🔄 重置稳定环境...")
+            
+#             obs = self.env.reset()
+#             self.current_step = 0
+            
+#             # 重置状态
+#             self.strawberries_picked = 0
+#             self.strawberries_on_plate = 0
+#             self.total_reward = 0.0
+#             self.strawberry_states = [True, True, True]
+#             self.strawberry_on_plate = [False, False, False]
+#             self.metacog_interventions = 0
+#             self.sensor_failures = 0
+            
+#             # 处理观测数据 - 使用真实数据
+#             processed_obs = self._process_real_observation(obs)
+            
+#             # 安全的位置调整
+#             robot_pos = processed_obs.get("robot0_eef_pos", np.array([0.5, 0.0, 0.8]))
+#             print(f"   机器人位置: {robot_pos}")
+            
+#             # 简单的位置调整
+#             if abs(robot_pos[0]) > 1.5 or abs(robot_pos[1]) > 1.5:
+#                 print("   ⚠️ 调整物体位置")
+#                 self.strawberry_positions += robot_pos[:3] * 0.5
+#                 self.plate_position += robot_pos[:3] * 0.5
+            
+#             # 构建信息
+#             info = {
+#                 "task_name": "Enhanced Strawberry Pick and Place",
+#                 "task_description": "Pick up strawberries and place them in the target location",
+#                 "step": self.current_step,
+#                 "max_steps": self.horizon,
+#                 "metacognitive_enabled": self.enable_metacognitive,
+#                 "strawberry_task_progress": {
+#                     "strawberries_picked": self.strawberries_picked,
+#                     "strawberries_on_plate": self.strawberries_on_plate,
+#                     "total_strawberries": 3,
+#                 }
+#             }
+            
+#             print("✅ 稳定环境重置成功")
+            
+#             return processed_obs, info
+            
+#         except Exception as e:
+#             print(f"❌ 环境重置失败: {e}")
+#             # 返回安全的默认值
+#             return self._get_safe_default_obs(), {"step": 0, "task_name": "Safe Default"}
+    
+#     def step(self, action: np.ndarray) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
+#         """安全的步进"""
+#         try:
+#             # 安全的动作适配
+#             adapted_action = self._safe_adapt_action(action)
+            
+#             # 环境步进
+#             obs, reward, done, info = self.env.step(adapted_action)
+#             self.current_step += 1
+            
+#             # 处理观测数据 - 使用真实数据
+#             processed_obs = self._process_real_observation(obs)
+            
+#             # 任务奖励评估
+#             task_reward, task_success = self._safe_evaluate_task(processed_obs, action)
+#             reward += task_reward
+#             self.total_reward += reward
+            
+#             # 元认知处理
+#             metacog_feedback = None
+#             if self.enable_metacognitive:
+#                 metacog_feedback = self._process_metacognitive_feedback(processed_obs, adapted_action)
+            
+#             # 任务完成
+#             if task_success:
+#                 done = True
+#                 reward += 10.0
+#                 print(f"🎉 草莓任务完成！")
+            
+#             # 超时
+#             if self.current_step >= self.horizon:
+#                 done = True
+            
+#             # 增强信息
+#             enhanced_info = {
+#                 **info,
+#                 "task_name": "Enhanced Strawberry Pick and Place",
+#                 "task_description": "Pick up strawberries and place them in the target location",
+#                 "step": self.current_step,
+#                 "max_steps": self.horizon,
+#                 "task_success": task_success,
+#                 "total_reward": self.total_reward,
+#                 "metacog_interventions": self.metacog_interventions,
+#                 "sensor_failures": self.sensor_failures,
+#                 "metacognitive_feedback": metacog_feedback,
+#                 "strawberry_task_progress": {
+#                     "strawberries_picked": self.strawberries_picked,
+#                     "strawberries_on_plate": self.strawberries_on_plate,
+#                     "total_strawberries": 3,
+#                 }
+#             }
+            
+#             # 简化的进度显示
+#             if self.current_step % 30 == 0:
+#                 print(f"   📊 步骤 {self.current_step}: 拣选={self.strawberries_picked}, 放置={self.strawberries_on_plate}, 奖励={self.total_reward:.2f}")
+#                 if self.enable_metacognitive:
+#                     print(f"   🧠 元认知干预: {self.metacog_interventions}")
+            
+#             return processed_obs, reward, done, False, enhanced_info
+            
+#         except Exception as e:
+#             print(f"❌ 步进失败: {e}")
+#             self.sensor_failures += 1
+#             # 返回安全值
+#             return self._get_safe_default_obs(), 0.0, True, False, {"step": self.current_step}
+    
+#     def _process_metacognitive_feedback(self, obs: Dict[str, np.ndarray], action: np.ndarray) -> Optional[str]:
+#         """处理元认知反馈 - 使用修复的元认知模块"""
+#         if not self.enable_metacognitive:
+#             return None
+        
+#         try:
+#             # 转换观测数据为传感器数据格式 - 元认知模块会自动适配维度
+#             sensor_data = self.robocasa_adapter.convert_observation(
+#                 obs, action, execution_status="normal"
+#             )
+            
+#             # 获取元认知输出
+#             metacog_output = self.metacog_module.process_sensor_data(sensor_data)
+            
+#             # 转换为VLA System2指令
+#             instruction = self.metacog_to_vla_adapter.convert_to_system2_instruction(metacog_output)
+            
+#             # 记录干预
+#             if instruction and metacog_output.directive != DirectiveType.CONTINUE:
+#                 self.metacog_interventions += 1
+#                 if self.current_step % 30 == 0:  # 适度的打印频率
+#                     print(f"   🧠 元认知干预: {instruction}")
+            
+#             return instruction
+            
+#         except Exception as e:
+#             if self.current_step % 40 == 0:  # 进一步减少错误打印频率
+#                 print(f"⚠️ 元认知处理错误: {e}")
+#             return None
+    
+#     def _process_real_observation(self, obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
+#         """处理真实观测数据 - 替换随机数据"""
+#         processed = {}
+        
+#         try:
+#             # 处理图像数据 - 使用真实相机数据
+#             image_found = False
+#             for camera in ["robot0_robotview", "robot0_eye_in_hand"]:
+#                 rgb_key = f"{camera}_image"
+#                 if rgb_key in obs and obs[rgb_key] is not None:
+#                     try:
+#                         img = obs[rgb_key]
+#                         if img is not None and img.size > 0:
+#                             if img.shape[:2] != (480, 640):
+#                                 img = cv2.resize(img, (640, 480))
+#                             processed["frontview_image"] = img.astype(np.uint8)
+#                             image_found = True
+#                             break
+#                     except Exception as e:
+#                         print(f"⚠️ 处理{camera}图像失败: {e}")
+#                         continue
+            
+#             if not image_found:
+#                 processed["frontview_image"] = np.zeros((480, 640, 3), dtype=np.uint8)
+#                 self.sensor_failures += 1
+            
+#             # 处理深度数据
+#             depth_found = False
+#             for camera in ["robot0_robotview", "robot0_eye_in_hand"]:
+#                 depth_key = f"{camera}_depth"
+#                 if depth_key in obs and obs[depth_key] is not None:
+#                     try:
+#                         depth = obs[depth_key]
+#                         if depth.size > 0:
+#                             if depth.shape != (480, 640):
+#                                 depth = cv2.resize(depth, (640, 480))
+#                             processed["frontview_depth"] = depth.astype(np.float32)
+#                             depth_found = True
+#                             break
+#                     except Exception:
+#                         continue
+            
+#             if not depth_found:
+#                 processed["frontview_depth"] = np.ones((480, 640), dtype=np.float32)
+            
+#             # 处理机器人状态数据 - 使用真实传感器数据
+#             robot_keys = ["robot0_joint_pos", "robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"]
+            
+#             for key in robot_keys:
+#                 if key in obs and obs[key] is not None:
+#                     try:
+#                         data = np.array(obs[key], dtype=np.float32)
+#                         # 检查数据有效性
+#                         if np.any(np.isnan(data)) or np.any(np.isinf(data)):
+#                             print(f"⚠️ {key} 包含无效数据")
+#                             data = np.nan_to_num(data, nan=0.0, posinf=1.0, neginf=-1.0)
+                        
+#                         if "joint" in key:
+#                             processed[key] = data[:5] if len(data) > 5 else data
+#                         else:
+#                             processed[key] = data
+#                     except Exception as e:
+#                         print(f"⚠️ 处理{key}失败: {e}")
+#                         self.sensor_failures += 1
+            
+#             # 提供安全的默认值（基于物理约束而不是随机）
+#             if "robot0_eef_pos" not in processed:
+#                 processed["robot0_eef_pos"] = np.array([0.5, 0.0, 0.8], dtype=np.float32)
+#             if "robot0_joint_pos" not in processed:
+#                 processed["robot0_joint_pos"] = np.zeros(5, dtype=np.float32)
+#             if "robot0_eef_quat" not in processed:
+#                 processed["robot0_eef_quat"] = np.array([0, 0, 0, 1], dtype=np.float32)
+#             if "robot0_gripper_qpos" not in processed:
+#                 processed["robot0_gripper_qpos"] = np.zeros(2, dtype=np.float32)
+            
+#             # 添加任务信息
+#             processed["robot_type"] = "SO100"
+#             processed["task_description"] = "Enhanced: Pick strawberries and place them carefully"
+#             processed["current_step"] = self.current_step
+            
+#             return processed
+            
+#         except Exception as e:
+#             print(f"⚠️ 观测数据处理错误: {e}")
+#             self.sensor_failures += 1
+#             return self._get_safe_default_obs()
+    
+#     def _safe_adapt_action(self, action: np.ndarray) -> np.ndarray:
+#         """安全的动作适配"""
+#         try:
+#             if not isinstance(action, np.ndarray):
+#                 action = np.array(action)
+            
+#             # 确保动作是有限的
+#             action = np.nan_to_num(action, nan=0.0, posinf=0.1, neginf=-0.1)
+            
+#             if len(action) == 6:
+#                 adapted = np.zeros(7)
+#                 adapted[0:3] = action[0:3]
+#                 adapted[3:5] = action[3:5]
+#                 adapted[5] = 0.0
+#                 adapted[6] = action[5]
+#                 return np.clip(adapted, -1.0, 1.0)
+#             elif len(action) == 7:
+#                 return np.clip(action, -1.0, 1.0)
+#             else:
+#                 adapted = np.zeros(7)
+#                 adapted[:min(len(action), 7)] = action[:7]
+#                 return np.clip(adapted, -1.0, 1.0)
+                
+#         except Exception as e:
+#             print(f"⚠️ 动作适配错误: {e}")
+#             return np.zeros(7)
+    
+#     def _safe_evaluate_task(self, obs: Dict[str, Any], action: np.ndarray) -> Tuple[float, bool]:
+#         """安全的草莓任务评估 - 基于真实传感器数据"""
+#         try:
+#             reward = 0.0
+#             task_success = False
+            
+#             robot_pos = obs.get("robot0_eef_pos")
+#             if robot_pos is None:
+#                 return reward, task_success
+            
+#             gripper_action = action[-1] if len(action) > 0 else 0.0
+            
+#             # 草莓检测 - 基于真实位置数据
+#             for i, (strawberry_pos, is_available) in enumerate(zip(self.strawberry_positions, self.strawberry_states)):
+#                 if not is_available:
+#                     continue
+                
+#                 try:
+#                     distance = np.linalg.norm(robot_pos - strawberry_pos)
+                    
+#                     if distance < 0.3:  # 接近草莓
+#                         reward += 0.5
+                        
+#                         if distance < 0.2 and gripper_action > 0.2:  # 抓取动作
+#                             if self.strawberry_states[i]:
+#                                 self.strawberry_states[i] = False
+#                                 self.strawberries_picked += 1
+#                                 reward += 2.0
+#                                 print(f"   🍓 拣选草莓{i+1}!")
+                                
+#                 except Exception:
+#                     continue
+            
+#             # 盘子检测 - 基于真实位置数据
+#             try:
+#                 plate_distance = np.linalg.norm(robot_pos - self.plate_position)
+                
+#                 if plate_distance < 0.25:  # 接近盘子
+#                     reward += 0.5
+                    
+#                     if plate_distance < 0.15 and gripper_action < -0.2:  # 放置动作
+#                         picked = sum(1 for state in self.strawberry_states if not state)
+#                         on_plate = sum(1 for state in self.strawberry_on_plate if state)
+                        
+#                         if picked > on_plate:
+#                             for i, on_plate_state in enumerate(self.strawberry_on_plate):
+#                                 if not on_plate_state and not self.strawberry_states[i]:
+#                                     self.strawberry_on_plate[i] = True
+#                                     self.strawberries_on_plate += 1
+#                                     reward += 3.0
+#                                     print(f"   🍽️ 放置草莓{i+1}!")
+#                                     break
+#             except Exception:
+#                 pass
+            
+#             # 任务完成判断
+#             if self.strawberries_on_plate >= 3:
+#                 task_success = True
+            
+#             return reward, task_success
+            
+#         except Exception as e:
+#             print(f"⚠️ 任务评估错误: {e}")
+#             return 0.0, False
+    
+#     def _get_safe_default_obs(self) -> Dict[str, np.ndarray]:
+#         """获取安全的默认观测"""
+#         return {
+#             "frontview_image": np.zeros((480, 640, 3), dtype=np.uint8),
+#             "frontview_depth": np.ones((480, 640), dtype=np.float32),
+#             "robot0_joint_pos": np.zeros(5, dtype=np.float32),
+#             "robot0_eef_pos": np.array([0.5, 0.0, 0.8], dtype=np.float32),
+#             "robot0_eef_quat": np.array([0, 0, 0, 1], dtype=np.float32),
+#             "robot0_gripper_qpos": np.zeros(2, dtype=np.float32),
+#             "robot_type": "SO100",
+#             "task_description": "Safe default observation",
+#             "current_step": self.current_step
+#         }
+    
+#     def get_action_space(self):
+#         """获取动作空间"""
+#         if self.env is None:
+#             raise RuntimeError("环境未初始化")
+        
+#         if hasattr(self.env, 'action_space'):
+#             return self.env.action_space
+#         else:
+#             import gym.spaces
+#             return gym.spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float32)
+    
+#     def close(self):
+#         """安全关闭环境"""
+#         if self.env is not None:
+#             try:
+#                 self.env.close()
+#                 print("🔒 增强草莓环境已关闭")
+#                 print(f"📊 最终结果: 拣选={self.strawberries_picked}/3, 放置={self.strawberries_on_plate}/3")
+#                 print(f"   总奖励={self.total_reward:.2f}, 元认知干预={self.metacog_interventions}, 传感器失败={self.sensor_failures}")
+#             except Exception as e:
+#                 print(f"⚠️ 关闭环境错误: {e}")
+#             finally:
+#                 self.env = None
+
+
+
+
+from robosuite.models.objects import BoxObject, CylinderObject, CanObject
+from robosuite.utils.placement_samplers import UniformRandomSampler
+
 class EnhancedStrawberryEnvironment:
-    """增强草莓环境 - 基于可工作的StableStrawberryEnvironment + 元认知集成"""
+    """
+    增强的桌面草莓环境 - 使用自定义的桌面场景替换厨房环境。
+    (最终兼容版，修复了size参数问题)
+    """
     
     def __init__(self, 
-                 so100_xml_path: str = None,
+                 so100_xml_path: str = None, 
                  horizon: int = 100,
                  enable_gui: bool = False,
                  robot: str = "Panda",
                  enable_metacognitive: bool = True,
                  device: str = "cuda" if torch.cuda.is_available() else "cpu"):
-        """
-        初始化增强草莓环境
         
-        Args:
-            so100_xml_path: SO100 XML路径
-            horizon: 最大步数
-            enable_gui: 是否启用GUI
-            robot: 机器人类型
-            enable_metacognitive: 是否启用元认知模块
-            device: 设备类型
-        """
         if not ROBOSUITE_AVAILABLE:
             raise ImportError("RoboSuite不可用")
         
         self.horizon = horizon
-        self.so100_xml_path = so100_xml_path
         self.enable_gui = enable_gui
         self.robot = robot
         self.enable_metacognitive = enable_metacognitive and METACOG_AVAILABLE
         self.device = device
         
-        # 环境状态
         self.env = None
         self.current_step = 0
+        self.table_top_offset = None
+        self.plate_pos = None
+        self.object_names = ["strawberry1", "strawberry2", "strawberry3", "grape1", "grape2", "grape3"]
+        self.held_object = None
+        self.placed_strawberries = set()
         
-        # 草莓任务状态
-        self.strawberry_positions = np.array([
-            [0.6, 0.1, 0.82],   
-            [0.7, 0.15, 0.82],  
-            [0.8, 0.1, 0.82]    
-        ])
-        self.plate_position = np.array([0.5, -0.2, 0.81])
-        self.strawberry_states = [True, True, True]
-        self.strawberry_on_plate = [False, False, False]
-        
-        # 统计
-        self.strawberries_picked = 0
-        self.strawberries_on_plate = 0
         self.total_reward = 0.0
         self.metacog_interventions = 0
         self.sensor_failures = 0
         
-        # 动作处理器
         self.action_processor = SimpleActionProcessor()
         
-        print(f"🍓 创建增强草莓环境")
+        print(f"🍓 创建增强的【桌面】草莓环境")
         print(f"   机器人: {robot}")
-        print(f"   GUI: {'启用' if enable_gui else '禁用 (避免崩溃)'}")
+        print(f"   GUI: {'启用' if enable_gui else '禁用'}")
         print(f"   最大步数: {horizon}")
-        print(f"   元认知模块: {'启用' if self.enable_metacognitive else '禁用'}")
-        print(f"   设备: {device}")
         
-        # 初始化元认知模块
         if self.enable_metacognitive:
             self._init_metacognitive_modules()
         
-        # 创建环境
-        self._create_stable_environment()
-    
+        self._create_tabletop_environment()
+
     def _init_metacognitive_modules(self):
-        """初始化元认知模块"""
         try:
             print("🧠 初始化元认知模块...")
-            
             self.metacog_module = CompleteMetaCognitiveModule(self.device)
-            self.robocasa_adapter = RoboCasaToMetacogAdapter(image_size=(224, 224))  # 使用标准适配器
+            self.robocasa_adapter = RoboCasaToMetacogAdapter(image_size=(224, 224))
             self.metacog_to_vla_adapter = MetacogToVLASystem2Adapter()
             self.action_adjuster = ActionAdjuster()
-            
             print("✅ 元认知模块初始化成功")
-            
         except Exception as e:
             print(f"❌ 元认知模块初始化失败: {e}")
             self.enable_metacognitive = False
-    
-    def _create_stable_environment(self):
-        """创建稳定环境 - 使用最简单的配置"""
+
+    def _create_tabletop_environment(self):
+        """
+        创建自定义的桌面环境 - 兼容旧版Robosuite API (size参数)
+        """
         try:
-            print("🏗️ 创建稳定环境...")
+            print("🏗️ 创建自定义桌面环境...")
             
-            # 最简单的配置 - 避免复杂参数
-            config = {
-                "env_name": "PnPCounterToCab",
-                "robots": self.robot,
-                "controller_configs": load_composite_controller_config(robot=self.robot),
-            }
+            # 【【【 已修复 】】】
+            # 1. 定义我们的物体，使用 size_min 和 size_max
+            strawberry_size = [0.02, 0.025] # [radius, half_height]
+            strawberries = [
+                CanObject(
+                    name=f"strawberry{i+1}", 
+                    size_min=strawberry_size, # 使用旧版API
+                    size_max=strawberry_size, # 使用旧版API
+                    rgba=[1, 0, 0, 1]
+                ) for i in range(3)
+            ]
             
-            print(f"   使用机器人: {self.robot}")
-            print(f"   控制器: 已加载")
+            grape_size = [0.018, 0.018] # [radius, half_height]
+            grapes = [
+                CylinderObject(
+                    name=f"grape{i+1}", 
+                    size_min=grape_size, # 使用旧版API
+                    size_max=grape_size, # 使用旧版API
+                    rgba=[0.5, 1, 0.5, 1]
+                ) for i in range(3)
+            ]
             
-            # 非常保守的环境配置
-            self.env = robosuite.make(
-                **config,
-                has_renderer=False,  # 强制关闭渲染器避免崩溃
-                has_offscreen_renderer=True,  # 保持离屏渲染
-                render_camera=None,
-                ignore_done=True,
-                use_camera_obs=True,
-                control_freq=20,
-                camera_names=["robot0_eye_in_hand"],  # 只使用一个相机
-                camera_heights=480,
-                camera_widths=640,
-                initialization_noise=None,  # 关闭噪声
+            plate_size = [0.12, 0.01] # [radius, half_height]
+            plate = CylinderObject(
+                name="plate",
+                size_min=plate_size, # 使用旧版API
+                size_max=plate_size, # 使用旧版API
+                rgba=[1, 1, 1, 1],
+                solimp=[0.998, 0.998, 0.001],
+                solref=[0.001, 1]
             )
             
-            print("✅ 稳定环境创建成功")
+            # 2. 配置环境 (与上一版相同)
+            config = {
+                "env_name": "PickPlace",
+                "robots": self.robot,
+                "controller_configs": load_composite_controller_config(robot=self.robot),
+                "placement_initializer": None,
+                "single_object_mode": 2,
+                "has_renderer": self.enable_gui,
+                "has_offscreen_renderer": True,
+                "ignore_done": True,
+                "use_camera_obs": True,
+                "control_freq": 20,
+                "camera_configs": {
+                    "type": "Camera",
+                    "name": "worldview",
+                    "pos": np.array([0.6, 0.0, 1.4]),
+                    "quat": np.array([0.653, 0.271, 0.653, -0.271]),
+                    "camera_fovy": 50
+                },
+                "camera_names": "worldview",
+                "camera_heights": 480,
+                "camera_widths": 640,
+                "mujoco_objects": strawberries + grapes + [plate]
+            }
             
-            # 简单验证
-            if hasattr(self.env, 'action_space'):
-                print(f"   动作空间: {getattr(self.env.action_space, 'shape', 'Unknown')}")
+            # 3. 创建环境
+            self.env = robosuite.make(**config)
+
+            # 4. 获取桌面信息
+            self.table_top_offset = self.env.table_top_offset
             
-            print("🎉 稳定环境初始化完成！")
+            print("✅ 自定义桌面环境创建成功！")
             
         except Exception as e:
             print(f"❌ 环境创建失败: {e}")
             import traceback
             traceback.print_exc()
             raise
-    
+
+
     def reset(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """重置环境"""
+        """重置环境，并手动放置所有物体"""
         try:
-            print("🔄 重置稳定环境...")
-            
+            print("🔄 重置桌面环境...")
             obs = self.env.reset()
             self.current_step = 0
             
             # 重置状态
-            self.strawberries_picked = 0
-            self.strawberries_on_plate = 0
             self.total_reward = 0.0
-            self.strawberry_states = [True, True, True]
-            self.strawberry_on_plate = [False, False, False]
-            self.metacog_interventions = 0
-            self.sensor_failures = 0
+            self.held_object = None
+            self.placed_strawberries.clear()
             
-            # 处理观测数据 - 使用真实数据
+            # --- 手动放置物体 ---
+            # 定义桌面上可放置物体的区域
+            table_pos = self.table_top_offset
+            x_range = [-0.15, 0.15]
+            y_range = [-0.25, 0.25]
+            
+            # 放置盘子
+            self.plate_pos = np.array([table_pos[0] - 0.25, table_pos[1], table_pos[2]])
+            self.env.sim.data.set_joint_qpos(
+                "plate_joint0",
+                np.concatenate([self.plate_pos, [1, 0, 0, 0]])
+            )
+            
+            # 随机放置草莓和葡萄
+            for obj_name in self.object_names:
+                while True:
+                    # 在桌面上随机选一个点
+                    random_pos = table_pos + np.array([
+                        np.random.uniform(*x_range),
+                        np.random.uniform(*y_range),
+                        0.02 # 物体高度偏移
+                    ])
+                    
+                    # 确保不会和盘子重叠
+                    if np.linalg.norm(random_pos[:2] - self.plate_pos[:2]) > 0.15:
+                        self.env.sim.data.set_joint_qpos(
+                            f"{obj_name}_joint0",
+                            np.concatenate([random_pos, [1, 0, 0, 0]])
+                        )
+                        break
+            
+            # --- 结束手动放置 ---
+            
             processed_obs = self._process_real_observation(obs)
+            info = self._get_current_info()
             
-            # 安全的位置调整
-            robot_pos = processed_obs.get("robot0_eef_pos", np.array([0.5, 0.0, 0.8]))
-            print(f"   机器人位置: {robot_pos}")
-            
-            # 简单的位置调整
-            if abs(robot_pos[0]) > 1.5 or abs(robot_pos[1]) > 1.5:
-                print("   ⚠️ 调整物体位置")
-                self.strawberry_positions += robot_pos[:3] * 0.5
-                self.plate_position += robot_pos[:3] * 0.5
-            
-            # 构建信息
-            info = {
-                "task_name": "Enhanced Strawberry Pick and Place",
-                "task_description": "Pick up strawberries and place them in the target location",
-                "step": self.current_step,
-                "max_steps": self.horizon,
-                "metacognitive_enabled": self.enable_metacognitive,
-                "strawberry_task_progress": {
-                    "strawberries_picked": self.strawberries_picked,
-                    "strawberries_on_plate": self.strawberries_on_plate,
-                    "total_strawberries": 3,
-                }
-            }
-            
-            print("✅ 稳定环境重置成功")
+            print("✅ 桌面环境重置成功，物体已放置。")
             
             return processed_obs, info
             
         except Exception as e:
             print(f"❌ 环境重置失败: {e}")
-            # 返回安全的默认值
             return self._get_safe_default_obs(), {"step": 0, "task_name": "Safe Default"}
-    
+
     def step(self, action: np.ndarray) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         """安全的步进"""
         try:
-            # 安全的动作适配
             adapted_action = self._safe_adapt_action(action)
-            
-            # 环境步进
             obs, reward, done, info = self.env.step(adapted_action)
             self.current_step += 1
             
-            # 处理观测数据 - 使用真实数据
             processed_obs = self._process_real_observation(obs)
             
-            # 任务奖励评估
-            task_reward, task_success = self._safe_evaluate_task(processed_obs, action)
-            reward += task_reward
+            # 使用全新的桌面任务评估函数
+            task_reward, task_success = self._evaluate_tabletop_task(processed_obs, adapted_action)
+            reward = task_reward # 我们只关心我们的任务奖励
             self.total_reward += reward
             
-            # 元认知处理
             metacog_feedback = None
             if self.enable_metacognitive:
                 metacog_feedback = self._process_metacognitive_feedback(processed_obs, adapted_action)
             
-            # 任务完成
             if task_success:
                 done = True
-                reward += 10.0
+                self.total_reward += 10.0 # 成功时给予巨大奖励
                 print(f"🎉 草莓任务完成！")
             
-            # 超时
             if self.current_step >= self.horizon:
                 done = True
+
+            enhanced_info = self._get_current_info()
+            enhanced_info['task_success'] = task_success
+            enhanced_info['metacognitive_feedback'] = metacog_feedback
             
-            # 增强信息
-            enhanced_info = {
-                **info,
-                "task_name": "Enhanced Strawberry Pick and Place",
-                "task_description": "Pick up strawberries and place them in the target location",
-                "step": self.current_step,
-                "max_steps": self.horizon,
-                "task_success": task_success,
-                "total_reward": self.total_reward,
-                "metacog_interventions": self.metacog_interventions,
-                "sensor_failures": self.sensor_failures,
-                "metacognitive_feedback": metacog_feedback,
-                "strawberry_task_progress": {
-                    "strawberries_picked": self.strawberries_picked,
-                    "strawberries_on_plate": self.strawberries_on_plate,
-                    "total_strawberries": 3,
-                }
-            }
-            
-            # 简化的进度显示
-            if self.current_step % 30 == 0:
-                print(f"   📊 步骤 {self.current_step}: 拣选={self.strawberries_picked}, 放置={self.strawberries_on_plate}, 奖励={self.total_reward:.2f}")
-                if self.enable_metacognitive:
-                    print(f"   🧠 元认知干预: {self.metacog_interventions}")
-            
+            if self.enable_gui:
+                self.env.render()
+
             return processed_obs, reward, done, False, enhanced_info
             
         except Exception as e:
             print(f"❌ 步进失败: {e}")
             self.sensor_failures += 1
-            # 返回安全值
             return self._get_safe_default_obs(), 0.0, True, False, {"step": self.current_step}
-    
-    def _process_metacognitive_feedback(self, obs: Dict[str, np.ndarray], action: np.ndarray) -> Optional[str]:
-        """处理元认知反馈 - 使用修复的元认知模块"""
-        if not self.enable_metacognitive:
-            return None
+
+    def _evaluate_tabletop_task(self, obs: Dict[str, Any], action: np.ndarray) -> Tuple[float, bool]:
+        """
+        全新的任务评估函数，基于3D坐标。
+        """
+        reward = 0.0
+        eef_pos = obs.get("robot0_eef_pos")
+        gripper_openness = obs.get("robot0_gripper_qpos")[0] # 假设值越大越开
         
-        try:
-            # 转换观测数据为传感器数据格式 - 元认知模块会自动适配维度
-            sensor_data = self.robocasa_adapter.convert_observation(
-                obs, action, execution_status="normal"
-            )
+        # 1. 抓取逻辑
+        if self.held_object is None:
+            # 寻找最近的、尚未放置的草莓
+            min_dist = float('inf')
+            target_strawberry = None
+            for i in range(3):
+                s_name = f"strawberry{i+1}"
+                if s_name not in self.placed_strawberries:
+                    s_pos = self.env.sim.data.body_xpos[self.env.sim.model.body_name2id(f"{s_name}_main")]
+                    dist = np.linalg.norm(eef_pos - s_pos)
+                    if dist < min_dist:
+                        min_dist = dist
+                        target_strawberry = s_name
             
-            # 获取元认知输出
-            metacog_output = self.metacog_module.process_sensor_data(sensor_data)
+            if target_strawberry:
+                # 奖励：靠近目标草莓
+                reward += 1.0 - np.tanh(10.0 * min_dist)
+                
+                # 检查是否抓取成功
+                if min_dist < 0.05 and gripper_openness < 0.01: # Gripper is closed
+                    self.held_object = target_strawberry
+                    reward += 5.0 # 抓取成功奖励
+                    print(f"   🍓 抓取 {self.held_object}!")
+
+        # 2. 放置逻辑
+        else:
+            # 奖励：靠近盘子
+            dist_to_plate = np.linalg.norm(eef_pos[:2] - self.plate_pos[:2])
+            reward += 1.0 - np.tanh(10.0 * dist_to_plate)
             
-            # 转换为VLA System2指令
-            instruction = self.metacog_to_vla_adapter.convert_to_system2_instruction(metacog_output)
+            # 获取当前抓着物体的实时位置
+            held_obj_pos = self.env.sim.data.body_xpos[self.env.sim.model.body_name2id(f"{self.held_object}_main")]
+
+            # 检查是否放置成功
+            dist_on_plate = np.linalg.norm(held_obj_pos[:2] - self.plate_pos[:2])
+            is_over_plate = dist_on_plate < 0.1 # 盘子半径
+            is_low_enough = held_obj_pos[2] < self.table_top_offset[2] + 0.05
             
-            # 记录干预
-            if instruction and metacog_output.directive != DirectiveType.CONTINUE:
-                self.metacog_interventions += 1
-                if self.current_step % 30 == 0:  # 适度的打印频率
-                    print(f"   🧠 元认知干预: {instruction}")
-            
-            return instruction
-            
-        except Exception as e:
-            if self.current_step % 40 == 0:  # 进一步减少错误打印频率
-                print(f"⚠️ 元认知处理错误: {e}")
-            return None
+            if is_over_plate and is_low_enough and gripper_openness > 0.02: # Gripper is opening
+                print(f"   🍽️ 放置 {self.held_object}!")
+                self.placed_strawberries.add(self.held_object)
+                self.held_object = None
+                reward += 10.0 # 放置成功奖励
+
+        # 3. 任务成功判断
+        task_success = len(self.placed_strawberries) == 3
+        return reward, task_success
     
+    # --- Helper and Unchanged Methods ---
+    
+    def _get_current_info(self) -> Dict[str, Any]:
+        return {
+            "task_name": "Tabletop Strawberry Pick and Place",
+            "task_description": "Pick up red strawberries and place them on the white plate.",
+            "step": self.current_step,
+            "max_steps": self.horizon,
+            "total_reward": self.total_reward,
+            "metacog_interventions": self.metacog_interventions,
+            "sensor_failures": self.sensor_failures,
+            "strawberry_task_progress": {
+                "strawberries_picked": 1 if self.held_object else 0,
+                "strawberries_on_plate": len(self.placed_strawberries),
+                "total_strawberries": 3,
+            }
+        }
+
     def _process_real_observation(self, obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
-        """处理真实观测数据 - 替换随机数据"""
         processed = {}
-        
         try:
-            # 处理图像数据 - 使用真实相机数据
-            image_found = False
-            for camera in ["robot0_robotview", "robot0_eye_in_hand"]:
-                rgb_key = f"{camera}_image"
-                if rgb_key in obs and obs[rgb_key] is not None:
-                    try:
-                        img = obs[rgb_key]
-                        if img is not None and img.size > 0:
-                            if img.shape[:2] != (480, 640):
-                                img = cv2.resize(img, (640, 480))
-                            processed["frontview_image"] = img.astype(np.uint8)
-                            image_found = True
-                            break
-                    except Exception as e:
-                        print(f"⚠️ 处理{camera}图像失败: {e}")
-                        continue
-            
-            if not image_found:
+            # 使用我们自定义的 'worldview' 相机
+            rgb_key = "worldview_image"
+            if rgb_key in obs and obs[rgb_key] is not None:
+                # Robosuite返回的图像是上下颠倒的，需要翻转
+                img = obs[rgb_key][::-1] 
+                processed["frontview_image"] = img.astype(np.uint8)
+            else:
                 processed["frontview_image"] = np.zeros((480, 640, 3), dtype=np.uint8)
                 self.sensor_failures += 1
             
-            # 处理深度数据
-            depth_found = False
-            for camera in ["robot0_robotview", "robot0_eye_in_hand"]:
-                depth_key = f"{camera}_depth"
-                if depth_key in obs and obs[depth_key] is not None:
-                    try:
-                        depth = obs[depth_key]
-                        if depth.size > 0:
-                            if depth.shape != (480, 640):
-                                depth = cv2.resize(depth, (640, 480))
-                            processed["frontview_depth"] = depth.astype(np.float32)
-                            depth_found = True
-                            break
-                    except Exception:
-                        continue
-            
-            if not depth_found:
+            depth_key = "worldview_depth"
+            if depth_key in obs and obs[depth_key] is not None:
+                depth = obs[depth_key][::-1]
+                processed["frontview_depth"] = depth.astype(np.float32)
+            else:
                 processed["frontview_depth"] = np.ones((480, 640), dtype=np.float32)
             
-            # 处理机器人状态数据 - 使用真实传感器数据
             robot_keys = ["robot0_joint_pos", "robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"]
-            
             for key in robot_keys:
                 if key in obs and obs[key] is not None:
-                    try:
-                        data = np.array(obs[key], dtype=np.float32)
-                        # 检查数据有效性
-                        if np.any(np.isnan(data)) or np.any(np.isinf(data)):
-                            print(f"⚠️ {key} 包含无效数据")
-                            data = np.nan_to_num(data, nan=0.0, posinf=1.0, neginf=-1.0)
-                        
-                        if "joint" in key:
-                            processed[key] = data[:5] if len(data) > 5 else data
-                        else:
-                            processed[key] = data
-                    except Exception as e:
-                        print(f"⚠️ 处理{key}失败: {e}")
-                        self.sensor_failures += 1
-            
-            # 提供安全的默认值（基于物理约束而不是随机）
-            if "robot0_eef_pos" not in processed:
-                processed["robot0_eef_pos"] = np.array([0.5, 0.0, 0.8], dtype=np.float32)
-            if "robot0_joint_pos" not in processed:
-                processed["robot0_joint_pos"] = np.zeros(5, dtype=np.float32)
-            if "robot0_eef_quat" not in processed:
-                processed["robot0_eef_quat"] = np.array([0, 0, 0, 1], dtype=np.float32)
-            if "robot0_gripper_qpos" not in processed:
-                processed["robot0_gripper_qpos"] = np.zeros(2, dtype=np.float32)
-            
-            # 添加任务信息
-            processed["robot_type"] = "SO100"
-            processed["task_description"] = "Enhanced: Pick strawberries and place them carefully"
-            processed["current_step"] = self.current_step
-            
+                    processed[key] = np.array(obs[key], dtype=np.float32)
+
             return processed
-            
         except Exception as e:
             print(f"⚠️ 观测数据处理错误: {e}")
             self.sensor_failures += 1
             return self._get_safe_default_obs()
-    
+
+    def close(self):
+        """安全关闭环境"""
+        if self.env is not None:
+            try:
+                self.env.close()
+                print("🔒 增强桌面环境已关闭")
+                print(f"📊 最终结果: 放置={len(self.placed_strawberries)}/3")
+            except Exception as e:
+                print(f"⚠️ 关闭环境错误: {e}")
+            finally:
+                self.env = None
+
     def _safe_adapt_action(self, action: np.ndarray) -> np.ndarray:
         """安全的动作适配"""
         try:
             if not isinstance(action, np.ndarray):
                 action = np.array(action)
             
-            # 确保动作是有限的
             action = np.nan_to_num(action, nan=0.0, posinf=0.1, neginf=-0.1)
             
             if len(action) == 6:
@@ -2498,71 +2984,6 @@ class EnhancedStrawberryEnvironment:
             print(f"⚠️ 动作适配错误: {e}")
             return np.zeros(7)
     
-    def _safe_evaluate_task(self, obs: Dict[str, Any], action: np.ndarray) -> Tuple[float, bool]:
-        """安全的草莓任务评估 - 基于真实传感器数据"""
-        try:
-            reward = 0.0
-            task_success = False
-            
-            robot_pos = obs.get("robot0_eef_pos")
-            if robot_pos is None:
-                return reward, task_success
-            
-            gripper_action = action[-1] if len(action) > 0 else 0.0
-            
-            # 草莓检测 - 基于真实位置数据
-            for i, (strawberry_pos, is_available) in enumerate(zip(self.strawberry_positions, self.strawberry_states)):
-                if not is_available:
-                    continue
-                
-                try:
-                    distance = np.linalg.norm(robot_pos - strawberry_pos)
-                    
-                    if distance < 0.3:  # 接近草莓
-                        reward += 0.5
-                        
-                        if distance < 0.2 and gripper_action > 0.2:  # 抓取动作
-                            if self.strawberry_states[i]:
-                                self.strawberry_states[i] = False
-                                self.strawberries_picked += 1
-                                reward += 2.0
-                                print(f"   🍓 拣选草莓{i+1}!")
-                                
-                except Exception:
-                    continue
-            
-            # 盘子检测 - 基于真实位置数据
-            try:
-                plate_distance = np.linalg.norm(robot_pos - self.plate_position)
-                
-                if plate_distance < 0.25:  # 接近盘子
-                    reward += 0.5
-                    
-                    if plate_distance < 0.15 and gripper_action < -0.2:  # 放置动作
-                        picked = sum(1 for state in self.strawberry_states if not state)
-                        on_plate = sum(1 for state in self.strawberry_on_plate if state)
-                        
-                        if picked > on_plate:
-                            for i, on_plate_state in enumerate(self.strawberry_on_plate):
-                                if not on_plate_state and not self.strawberry_states[i]:
-                                    self.strawberry_on_plate[i] = True
-                                    self.strawberries_on_plate += 1
-                                    reward += 3.0
-                                    print(f"   🍽️ 放置草莓{i+1}!")
-                                    break
-            except Exception:
-                pass
-            
-            # 任务完成判断
-            if self.strawberries_on_plate >= 3:
-                task_success = True
-            
-            return reward, task_success
-            
-        except Exception as e:
-            print(f"⚠️ 任务评估错误: {e}")
-            return 0.0, False
-    
     def _get_safe_default_obs(self) -> Dict[str, np.ndarray]:
         """获取安全的默认观测"""
         return {
@@ -2581,30 +3002,141 @@ class EnhancedStrawberryEnvironment:
         """获取动作空间"""
         if self.env is None:
             raise RuntimeError("环境未初始化")
-        
-        if hasattr(self.env, 'action_space'):
-            return self.env.action_space
-        else:
-            import gym.spaces
-            return gym.spaces.Box(low=-1.0, high=1.0, shape=(7,), dtype=np.float32)
+        return self.env.action_space
     
-    def close(self):
-        """安全关闭环境"""
-        if self.env is not None:
-            try:
-                self.env.close()
-                print("🔒 增强草莓环境已关闭")
-                print(f"📊 最终结果: 拣选={self.strawberries_picked}/3, 放置={self.strawberries_on_plate}/3")
-                print(f"   总奖励={self.total_reward:.2f}, 元认知干预={self.metacog_interventions}, 传感器失败={self.sensor_failures}")
-            except Exception as e:
-                print(f"⚠️ 关闭环境错误: {e}")
-            finally:
-                self.env = None
+    def _process_metacognitive_feedback(self, obs: Dict[str, np.ndarray], action: np.ndarray) -> Optional[str]:
+        """处理元认知反馈 - 使用修复的元认知模块"""
+        if not self.enable_metacognitive:
+            return None
+        
+        try:
+            sensor_data = self.robocasa_adapter.convert_observation(
+                obs, action, execution_status="normal"
+            )
+            metacog_output = self.metacog_module.process_sensor_data(sensor_data)
+            instruction = self.metacog_to_vla_adapter.convert_to_system2_instruction(metacog_output)
+            
+            if instruction and metacog_output.directive != DirectiveType.CONTINUE:
+                self.metacog_interventions += 1
+            
+            return instruction
+            
+        except Exception as e:
+            return None
 
 # ==================== 支持视频录制的增强草莓环境 ====================
 
+# class EnhancedStrawberryEnvironmentWithVideo(EnhancedStrawberryEnvironment):
+#     """增强草莓环境 - 支持视频录制"""
+    
+#     def __init__(self, 
+#                  so100_xml_path: str = None,
+#                  horizon: int = 100,
+#                  enable_gui: bool = False,
+#                  robot: str = "Panda",
+#                  enable_metacognitive: bool = True,
+#                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
+#                  # 新增视频录制参数
+#                  enable_video_recording: bool = True,
+#                  video_output_dir: str = "./experiment_videos",
+#                  video_fps: int = 20):
+#         """
+#         初始化支持视频录制的增强草莓环境
+        
+#         Args:
+#             enable_video_recording: 是否启用视频录制
+#             video_output_dir: 视频保存目录
+#             video_fps: 视频帧率
+#         """
+        
+#         # 初始化父类
+#         super().__init__(so100_xml_path, horizon, enable_gui, robot, 
+#                         enable_metacognitive, device)
+        
+#         # 视频录制设置
+#         self.enable_video_recording = enable_video_recording
+#         self.video_recorder = None
+        
+#         if self.enable_video_recording:
+#             self.video_recorder = VideoRecorder(
+#                 output_dir=video_output_dir,
+#                 fps=video_fps,
+#                 video_size=(640, 480)
+#             )
+#             print(f"🎥 视频录制已启用")
+#         else:
+#             print(f"📷 视频录制已禁用")
+    
+#     def reset(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+#         """重置环境并开始新的视频录制"""
+#         obs, info = super().reset()
+        
+#         # 开始新的episode录制
+#         if self.enable_video_recording and self.video_recorder:
+#             episode_id = info.get('episode_id', 0)
+#             self.video_recorder.start_episode_recording(episode_id, "enhanced_strawberry")
+            
+#             # 录制第一帧
+#             self._record_current_frame(obs, info)
+        
+#         return obs, info
+    
+#     def step(self, action: np.ndarray) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
+#         """环境步进并录制视频帧"""
+#         obs, reward, done, truncated, info = super().step(action)
+        
+#         # 录制当前帧
+#         if self.enable_video_recording and self.video_recorder:
+#             self._record_current_frame(obs, info)
+            
+#             # 如果episode结束，停止录制
+#             if done:
+#                 self.video_recorder.stop_episode_recording()
+        
+#         return obs, reward, done, truncated, info
+    
+#     def _record_current_frame(self, obs: Dict[str, Any], info: Dict[str, Any]):
+#         """录制当前帧"""
+#         try:
+#             # 提取RGB图像
+#             rgb_image = None
+            
+#             # 尝试从观测中获取图像
+#             if "frontview_image" in obs and obs["frontview_image"] is not None:
+#                 rgb_image = obs["frontview_image"]
+#             elif "robot0_robotview_image" in obs and obs["robot0_robotview_image"] is not None:
+#                 rgb_image = obs["robot0_robotview_image"]
+            
+#             if rgb_image is not None:
+#                 # 准备帧信息
+#                 frame_info = {
+#                     'step': info.get('step', self.current_step),
+#                     'total_reward': info.get('total_reward', self.total_reward),
+#                     'task_success': info.get('task_success', False),
+#                     'strawberry_task_progress': info.get('strawberry_task_progress', {}),
+#                     'metacognitive_feedback': info.get('metacognitive_feedback')
+#                 }
+                
+#                 # 添加帧到录制器
+#                 self.video_recorder.add_frame(rgb_image, frame_info)
+            
+#         except Exception as e:
+#             print(f"⚠️ 录制帧失败: {e}")
+    
+#     def close(self):
+#         """关闭环境并清理视频录制器"""
+#         # 停止视频录制
+#         if self.enable_video_recording and self.video_recorder:
+#             self.video_recorder.cleanup()
+        
+#         # 调用父类关闭方法
+#         super().close()
+
+
 class EnhancedStrawberryEnvironmentWithVideo(EnhancedStrawberryEnvironment):
-    """增强草莓环境 - 支持视频录制"""
+    """
+    支持视频录制的增强桌面环境 (此类代码基本不变, 仅继承新的父类)
+    """
     
     def __init__(self, 
                  so100_xml_path: str = None,
@@ -2613,24 +3145,14 @@ class EnhancedStrawberryEnvironmentWithVideo(EnhancedStrawberryEnvironment):
                  robot: str = "Panda",
                  enable_metacognitive: bool = True,
                  device: str = "cuda" if torch.cuda.is_available() else "cpu",
-                 # 新增视频录制参数
                  enable_video_recording: bool = True,
                  video_output_dir: str = "./experiment_videos",
                  video_fps: int = 20):
-        """
-        初始化支持视频录制的增强草莓环境
         
-        Args:
-            enable_video_recording: 是否启用视频录制
-            video_output_dir: 视频保存目录
-            video_fps: 视频帧率
-        """
-        
-        # 初始化父类
+        # 初始化父类 (现在是新的桌面环境父类)
         super().__init__(so100_xml_path, horizon, enable_gui, robot, 
                         enable_metacognitive, device)
         
-        # 视频录制设置
         self.enable_video_recording = enable_video_recording
         self.video_recorder = None
         
@@ -2645,47 +3167,25 @@ class EnhancedStrawberryEnvironmentWithVideo(EnhancedStrawberryEnvironment):
             print(f"📷 视频录制已禁用")
     
     def reset(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """重置环境并开始新的视频录制"""
         obs, info = super().reset()
-        
-        # 开始新的episode录制
         if self.enable_video_recording and self.video_recorder:
             episode_id = info.get('episode_id', 0)
-            self.video_recorder.start_episode_recording(episode_id, "enhanced_strawberry")
-            
-            # 录制第一帧
+            self.video_recorder.start_episode_recording(episode_id, "tabletop_strawberry")
             self._record_current_frame(obs, info)
-        
         return obs, info
     
     def step(self, action: np.ndarray) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
-        """环境步进并录制视频帧"""
         obs, reward, done, truncated, info = super().step(action)
-        
-        # 录制当前帧
         if self.enable_video_recording and self.video_recorder:
             self._record_current_frame(obs, info)
-            
-            # 如果episode结束，停止录制
             if done:
                 self.video_recorder.stop_episode_recording()
-        
         return obs, reward, done, truncated, info
     
     def _record_current_frame(self, obs: Dict[str, Any], info: Dict[str, Any]):
-        """录制当前帧"""
         try:
-            # 提取RGB图像
-            rgb_image = None
-            
-            # 尝试从观测中获取图像
-            if "frontview_image" in obs and obs["frontview_image"] is not None:
-                rgb_image = obs["frontview_image"]
-            elif "robot0_robotview_image" in obs and obs["robot0_robotview_image"] is not None:
-                rgb_image = obs["robot0_robotview_image"]
-            
+            rgb_image = obs.get("frontview_image")
             if rgb_image is not None:
-                # 准备帧信息
                 frame_info = {
                     'step': info.get('step', self.current_step),
                     'total_reward': info.get('total_reward', self.total_reward),
@@ -2693,20 +3193,13 @@ class EnhancedStrawberryEnvironmentWithVideo(EnhancedStrawberryEnvironment):
                     'strawberry_task_progress': info.get('strawberry_task_progress', {}),
                     'metacognitive_feedback': info.get('metacognitive_feedback')
                 }
-                
-                # 添加帧到录制器
                 self.video_recorder.add_frame(rgb_image, frame_info)
-            
         except Exception as e:
             print(f"⚠️ 录制帧失败: {e}")
     
     def close(self):
-        """关闭环境并清理视频录制器"""
-        # 停止视频录制
         if self.enable_video_recording and self.video_recorder:
             self.video_recorder.cleanup()
-        
-        # 调用父类关闭方法
         super().close()
 
 # ==================== 增强GR00T客户端 ====================

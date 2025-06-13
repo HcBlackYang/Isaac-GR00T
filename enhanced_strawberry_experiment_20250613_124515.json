@@ -1,0 +1,63 @@
+{
+  "timestamp": "20250613_124515",
+  "experiment_type": "Enhanced_Strawberry_Pickplace",
+  "config": {
+    "host": "localhost",
+    "port": 5555,
+    "experiment_name": "enhanced_strawberry_integration_with_video",
+    "num_episodes": 3,
+    "max_steps_per_episode": 80,
+    "so100_xml_path": "/root/autodl-tmp/gr00t/SO-ARM100/Simulation/URDF_SO100/SO_5DOF_ARM100_05d.SLDASM/urdf/SO_5DOF_ARM100_05d.SLDASM.xml",
+    "enable_metacognitive": true,
+    "device": "cuda"
+  },
+  "results": [
+    {
+      "episode_id": 0,
+      "task_success": false,
+      "total_steps": 80,
+      "total_time": 21.555346727371216,
+      "total_reward": 0.0,
+      "api_calls": 80,
+      "api_successes": 80,
+      "metacog_interventions": 0,
+      "sensor_failures": 0,
+      "strawberries_picked": 0,
+      "strawberries_on_plate": 0
+    },
+    {
+      "episode_id": 1,
+      "task_success": false,
+      "total_steps": 80,
+      "total_time": 20.26138663291931,
+      "total_reward": 0.0,
+      "api_calls": 80,
+      "api_successes": 80,
+      "metacog_interventions": 0,
+      "sensor_failures": 0,
+      "strawberries_picked": 0,
+      "strawberries_on_plate": 0
+    },
+    {
+      "episode_id": 2,
+      "task_success": false,
+      "total_steps": 80,
+      "total_time": 21.66960120201111,
+      "total_reward": 0.0,
+      "api_calls": 80,
+      "api_successes": 80,
+      "metacog_interventions": 0,
+      "sensor_failures": 0,
+      "strawberries_picked": 0,
+      "strawberries_on_plate": 0
+    }
+  ],
+  "summary": {
+    "total_episodes": 3,
+    "success_rate": 0.0,
+    "avg_reward": 0.0,
+    "total_strawberries_picked": 0,
+    "total_strawberries_placed": 0,
+    "total_metacog_interventions": 0
+  }
+}

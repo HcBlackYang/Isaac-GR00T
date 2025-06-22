@@ -3308,16 +3308,634 @@
 #     main()
 
 
-#!/usr/bin/env python3
-"""
-RoboSuite-GR00T草莓拣选接口 (兼容性修复版)
-解决SO100机器人兼容性问题，使用PickPlace环境并自定义场景
-"""
+# #!/usr/bin/env python3
+# """
+# RoboSuite-GR00T草莓拣选接口 (兼容性修复版)
+# 解决SO100机器人兼容性问题，使用PickPlace环境并自定义场景
+# """
+
+# import os
+# import sys
+# import time
+# import json
+# import numpy as np
+# import cv2
+# from pathlib import Path
+# from dataclasses import dataclass
+# from datetime import datetime
+
+# # 设置环境变量
+# os.environ.setdefault('MUJOCO_GL', 'egl')
+# os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')
+
+# # 导入检查
+# try:
+#     import robosuite
+#     from robosuite.controllers import load_composite_controller_config
+#     from robosuite.utils.placement_samplers import UniformRandomSampler
+#     ROBOSUITE_AVAILABLE = True
+#     print("✅ RoboSuite可用")
+# except ImportError as e:
+#     print(f"❌ RoboSuite不可用: {e}")
+#     ROBOSUITE_AVAILABLE = False
+
+# try:
+#     from gr00t.eval.robot import RobotInferenceClient
+#     print("✅ GR00T客户端可用")
+# except ImportError as e:
+#     print(f"❌ GR00T客户端不可用: {e}"); sys.exit(1)
+
+
+# class VideoRecorder:
+#     def __init__(self, output_dir: str = "./strawberry_videos", fps: int = 20, video_size: tuple = (640, 480), codec: str = 'mp4v'):
+#         self.output_dir = Path(output_dir); self.output_dir.mkdir(parents=True, exist_ok=True)
+#         self.fps, self.video_size, self.codec = fps, video_size, codec
+#         self.is_recording, self.video_writer, self.current_episode, self.frame_count = False, None, 0, 0
+#         print(f"🎥 视频录制器初始化于: {self.output_dir}")
+    
+#     def start_episode_recording(self, episode_id: int, experiment_name: str):
+#         if self.is_recording: self.stop_episode_recording()
+#         self.current_episode, self.frame_count = episode_id, 0
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         filename = f"{experiment_name}_episode_{episode_id:03d}_{timestamp}.mp4"
+#         self.video_path = self.output_dir / filename
+#         fourcc = cv2.VideoWriter_fourcc(*self.codec)
+#         self.video_writer = cv2.VideoWriter(str(self.video_path), fourcc, self.fps, self.video_size)
+#         if not self.video_writer.isOpened(): print(f"❌ 无法创建视频文件: {self.video_path}"); return False
+#         self.is_recording = True; print(f"🎬 开始录制 Episode {episode_id}: {filename}"); return True
+    
+#     def add_frame(self, image: np.ndarray, step_info: dict = None):
+#         if not self.is_recording: return
+#         processed_image = self._process_image(image, step_info)
+#         if self.video_writer and self.video_writer.isOpened(): self.video_writer.write(processed_image); self.frame_count += 1
+    
+#     def _process_image(self, image: np.ndarray, step_info: dict = None) -> np.ndarray:
+#         if image is None: image = np.zeros((*self.video_size[::-1], 3), dtype=np.uint8)
+#         if image.dtype != np.uint8: image = (image * 255).astype(np.uint8) if image.max() <= 1.0 else image.astype(np.uint8)
+#         if image.shape[:2] != self.video_size[::-1]: image = cv2.resize(image, self.video_size)
+#         if len(image.shape) == 2 or (len(image.shape) == 3 and image.shape[2] == 1): image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+#         elif len(image.shape) == 3 and image.shape[2] == 4: image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+#         if step_info: image = self._add_info_overlay(image, step_info)
+#         return image
+    
+#     def _add_info_overlay(self, image: np.ndarray, step_info: dict) -> np.ndarray:
+#         overlay = image.copy()
+#         font, scale, color, thick, y = cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, 30
+#         if 'step' in step_info: cv2.putText(overlay, f"Ep: {self.current_episode} | Step: {step_info['step']}", (10, y), font, scale, color, thick); y += 25
+#         if 'task_progress' in step_info: cv2.putText(overlay, f"Progress: {step_info['task_progress']:.0%} | Picked: {step_info.get('strawberries_on_plate', 0)}/3", (10, y), font, scale, color, thick); y += 25
+#         if 'reward' in step_info: cv2.putText(overlay, f"Reward: {step_info['reward']:.2f}", (10, y), font, scale, color, thick); y += 25
+#         if step_info.get('task_success', False): cv2.putText(overlay, "TASK SUCCESS!", (10, image.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
+#         return overlay
+    
+#     def stop_episode_recording(self):
+#         if not self.is_recording: return
+#         print(f"🎬 停止录制 Episode {self.current_episode} ({self.frame_count} 帧)")
+#         self.is_recording = False
+#         if self.video_writer: self.video_writer.release(); self.video_writer = None
+#         if hasattr(self, 'video_path') and self.video_path.exists(): print(f"✅ 视频已保存: {self.video_path} ({self.video_path.stat().st_size / 1e6:.1f}MB)")
+    
+#     def cleanup(self):
+#         if self.is_recording: self.stop_episode_recording()
+
+
+# @dataclass
+# class ExperimentConfig:
+#     robot: str = "Panda"  # 改为Panda，更稳定
+#     num_episodes: int = 3
+#     max_steps_per_episode: int = 250
+#     enable_gui: bool = False  # 启用GUI观察
+#     enable_video_recording: bool = True
+#     video_output_dir: str = "./strawberry_videos"
+#     groot_host: str = "localhost"
+#     groot_port: int = 5555
+
+
+# class StrawberryPickPlaceEnvironment:
+#     def __init__(self, config: ExperimentConfig):
+#         self.config = config
+#         self.robot_name = config.robot
+#         print(f"🤖 正在为 {self.robot_name} 创建环境...")
+#         self.video_recorder = VideoRecorder(output_dir=config.video_output_dir, fps=20) if config.enable_video_recording else None
+#         self.held_object, self.placed_strawberries, self.task_complete, self.current_step = None, set(), False, 0
+
+#         try:
+#             from robosuite.controllers import load_composite_controller_config
+
+#             # 使用稳定的PickPlace环境
+#             controller_config = load_composite_controller_config(robot=self.robot_name)
+#             print(f"🎛️ 加载控制器配置 for robot: {self.robot_name}")
+
+#             # 创建环境 - 使用多物体模式
+#             self.env = robosuite.make(
+#                 "PickPlace",
+#                 robots=self.robot_name,
+#                 controller_configs=controller_config,
+#                 has_renderer=config.enable_gui,
+#                 has_offscreen_renderer=config.enable_video_recording or not config.enable_gui,
+#                 use_camera_obs=True,
+#                 camera_names=["frontview", "agentview"],  # 多个视角
+#                 camera_heights=480,
+#                 camera_widths=640,
+#                 control_freq=20,
+#                 horizon=config.max_steps_per_episode,
+#                 ignore_done=True,
+#                 single_object_mode=0,  # 允许多个对象
+#                 object_type="milk",    # 使用milk对象作为"盘子"
+#                 reward_shaping=True,
+#             )
+            
+#             self.robot_model = self.env.robots[0]
+#             self.actual_robot_dof, self.action_dim = self.robot_model.dof, self.robot_model.action_dim
+#             print(f"   - 实际机器人: {type(self.robot_model).__name__}, DOF: {self.actual_robot_dof}, 动作维度: {self.action_dim}")
+            
+#             # 获取环境的实际信息
+#             self._get_environment_info()
+#             self._setup_custom_task()
+#             print(f"✅ Robosuite 环境创建成功，已设置自定义草莓任务。")
+            
+#         except Exception as e:
+#             print(f"❌ 环境创建失败: {e}"); import traceback; traceback.print_exc(); raise
+
+#     def _get_environment_info(self):
+#         """获取环境的实际信息"""
+#         # 重置环境获取初始状态
+#         initial_obs = self.env.reset()
+        
+#         # 获取机器人末端执行器位置
+#         if "robot0_eef_pos" in initial_obs:
+#             self.robot_eef_pos = initial_obs["robot0_eef_pos"]
+#             print(f"🔍 机器人末端位置: {self.robot_eef_pos}")
+#         else:
+#             self.robot_eef_pos = np.array([0.5, 0, 1.0])  # 默认值
+        
+#         # 尝试获取桌子信息
+#         try:
+#             self.table_offset = self.env.table_offset
+#             print(f"🔍 桌子偏移: {self.table_offset}")
+#         except AttributeError:
+#             # 基于机器人位置推算桌子位置
+#             robot_base_z = self.robot_eef_pos[2]
+#             # 如果机器人在地面，桌子高度设为合理值
+#             if robot_base_z < 0.5:
+#                 table_z = robot_base_z + 0.8  # 桌子比机器人基座高0.8米
+#             else:
+#                 table_z = robot_base_z + 0.1   # 机器人已经在合理高度
+            
+#             self.table_offset = np.array([self.robot_eef_pos[0], self.robot_eef_pos[1], table_z])
+#             print(f"🔍 推算桌子位置: {self.table_offset}")
+#             print(f"🔍 机器人到桌面距离: {table_z - robot_base_z:.3f}m")
+
+#     def _setup_custom_task(self):
+#         """设置自定义草莓任务的虚拟对象位置"""
+#         # 基于机器人实际位置设置虚拟对象
+#         robot_x, robot_y, robot_z = self.robot_eef_pos
+        
+#         # 工作台面应该在机器人末端附近（稍微高一点）
+#         work_surface_z = robot_z + 0.05  # 比机器人末端高5cm
+        
+#         # 盘子位置（在机器人前方）
+#         self.virtual_plate_pos = np.array([robot_x + 0.2, robot_y - 0.1, work_surface_z])
+        
+#         # 三个草莓的位置（围绕机器人可达范围）
+#         self.virtual_strawberry_positions = [
+#             np.array([robot_x + 0.1, robot_y + 0.1, work_surface_z]),   # 右前
+#             np.array([robot_x - 0.1, robot_y + 0.1, work_surface_z]),   # 左前
+#             np.array([robot_x, robot_y + 0.15, work_surface_z])         # 正前
+#         ]
+        
+#         # 四个绿色小球的位置（分散但在可达范围内）
+#         self.virtual_green_balls = [
+#             np.array([robot_x + 0.15, robot_y + 0.05, work_surface_z]), # 右近
+#             np.array([robot_x - 0.15, robot_y + 0.05, work_surface_z]), # 左近
+#             np.array([robot_x + 0.05, robot_y + 0.2, work_surface_z]),  # 右远
+#             np.array([robot_x - 0.05, robot_y + 0.2, work_surface_z])   # 左远
+#         ]
+        
+#         print(f"🍓 虚拟草莓位置: {len(self.virtual_strawberry_positions)} 个")
+#         for i, pos in enumerate(self.virtual_strawberry_positions):
+#             dist = np.linalg.norm(pos - self.robot_eef_pos)
+#             print(f"   草莓{i}: {pos} (距离机器人: {dist:.3f}m)")
+            
+#         print(f"🟢 虚拟绿球位置: {len(self.virtual_green_balls)} 个") 
+#         print(f"🍽️ 虚拟盘子位置: {self.virtual_plate_pos}")
+        
+#         plate_dist = np.linalg.norm(self.virtual_plate_pos - self.robot_eef_pos)
+#         print(f"📏 盘子距离机器人: {plate_dist:.3f}m")
+        
+#         # 打印位置信息用于调试
+#         print(f"📍 机器人末端: {self.robot_eef_pos}")
+#         print(f"📍 工作表面高度: {work_surface_z:.3f}m")
+
+#     def reset(self):
+#         obs = self.env.reset()
+#         self.current_step, self.held_object, self.task_complete = 0, None, False
+#         self.placed_strawberries.clear()
+        
+#         # 重新获取环境信息（因为重置可能改变位置）
+#         self._get_environment_info()
+#         self._setup_custom_task()
+        
+#         return self._process_observation(obs)
+
+#     def step(self, action):
+#         obs, env_reward, done, info = self.env.step(action)
+#         self.current_step += 1
+        
+#         # 计算自定义任务奖励
+#         task_reward = self._calculate_strawberry_reward(obs)
+        
+#         # 任务成功条件
+#         task_success = len(self.placed_strawberries) == 3
+#         done = task_success or self.current_step >= self.config.max_steps_per_episode
+        
+#         processed_obs = self._process_observation(obs)
+#         info.update(self.get_task_info())
+        
+#         # 录制视频帧
+#         if self.video_recorder and self.video_recorder.is_recording:
+#             info_for_video = {
+#                 'step': self.current_step,
+#                 'reward': task_reward,
+#                 'task_progress': info['task_progress'],
+#                 'strawberries_on_plate': info['strawberries_on_plate'],
+#                 'task_success': task_success,
+#                 'env_reward': env_reward  # 也显示环境原始奖励
+#             }
+#             self.video_recorder.add_frame(processed_obs["frontview_image"], info_for_video)
+        
+#         return processed_obs, task_reward, done, info
+
+#     def _calculate_strawberry_reward(self, obs):
+#         """计算基于虚拟草莓拣选任务的奖励"""
+#         reward = 0.0
+#         eef_pos = obs.get("robot0_eef_pos")
+#         gripper_qpos = obs.get("robot0_gripper_qpos")
+        
+#         if eef_pos is None or gripper_qpos is None:
+#             return 0.0
+        
+#         # 修复夹爪状态处理
+#         if hasattr(gripper_qpos, '__len__') and not isinstance(gripper_qpos, (int, float)):
+#             if len(gripper_qpos) > 0:
+#                 gripper_normalized = np.mean(gripper_qpos)  # Panda有两个夹爪joint
+#                 gripper_normalized = (gripper_normalized + 0.04) / 0.08  # Panda夹爪范围约为[-0.04, 0.04]
+#             else:
+#                 gripper_normalized = 0.0
+#         else:
+#             # 单个标量值
+#             gripper_normalized = float(gripper_qpos)
+#             if self.robot_name == "Panda":
+#                 gripper_normalized = (gripper_normalized + 0.04) / 0.08
+#             else:
+#                 gripper_normalized = np.abs(gripper_normalized)
+        
+#         gripper_normalized = np.clip(gripper_normalized, 0, 1)
+
+#         # 如果没有抓取物体，奖励接近草莓
+#         if self.held_object is None:
+#             available_strawberries = [i for i in range(len(self.virtual_strawberry_positions)) 
+#                                     if i not in self.placed_strawberries]
+            
+#             if available_strawberries:
+#                 distances = [np.linalg.norm(eef_pos - self.virtual_strawberry_positions[i]) 
+#                            for i in available_strawberries]
+#                 min_dist = min(distances)
+#                 closest_idx = available_strawberries[np.argmin(distances)]
+                
+#                 # 接近草莓的奖励
+#                 reward += 2.0 * (1.0 - np.tanh(3.0 * min_dist))
+                
+#                 # 抓取条件：距离很近且夹爪闭合
+#                 if min_dist < 0.08 and gripper_normalized < 0.3:
+#                     self.held_object = f"strawberry_{closest_idx}"
+#                     reward += 20.0
+#                     print(f"   🍓 虚拟抓取草莓 {closest_idx}! (距离:{min_dist:.3f}, 夹爪:{gripper_normalized:.3f})")
+        
+#         # 如果抓取了物体，奖励移动到盘子
+#         else:
+#             dist_to_plate = np.linalg.norm(eef_pos - self.virtual_plate_pos)
+            
+#             # 接近盘子的奖励
+#             reward += 2.0 * (1.0 - np.tanh(3.0 * dist_to_plate))
+            
+#             # 放置条件：接近盘子且夹爪打开
+#             if dist_to_plate < 0.1 and gripper_normalized > 0.7:
+#                 strawberry_idx = int(self.held_object.split('_')[-1])
+#                 self.placed_strawberries.add(strawberry_idx)
+#                 self.held_object = None
+#                 reward += 30.0
+#                 print(f"   🍽️ 虚拟放置草莓! ({len(self.placed_strawberries)}/3) (距离:{dist_to_plate:.3f}, 夹爪:{gripper_normalized:.3f})")
+        
+#         # 完成任务的额外奖励
+#         if len(self.placed_strawberries) == 3 and not self.task_complete:
+#             reward += 100.0
+#             self.task_complete = True
+#             print("\n🎉 虚拟草莓拣选任务成功!")
+        
+#         return reward
+
+#     def _process_observation(self, obs):
+#         """处理观测数据"""
+#         def process_image(img):
+#             if img is not None:
+#                 # 确保图像是正确的格式
+#                 if img.dtype != np.uint8:
+#                     img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+#                 # RoboSuite图像可能需要翻转
+#                 return img[::-1]
+#             else:
+#                 return np.zeros((480, 640, 3), np.uint8)
+        
+#         processed_obs = {
+#             "frontview_image": process_image(obs.get("frontview_image")),
+#             "robot0_joint_pos": obs.get("robot0_joint_pos"),
+#             "robot0_gripper_qpos": obs.get("robot0_gripper_qpos"),
+#             "robot0_eef_pos": obs.get("robot0_eef_pos"),
+#         }
+        
+#         # 添加agentview如果可用
+#         if "agentview_image" in obs:
+#             processed_obs["agentview_image"] = process_image(obs.get("agentview_image"))
+        
+#         return processed_obs
+
+#     def get_task_info(self):
+#         """获取任务信息"""
+#         return {
+#             "task_success": self.task_complete,
+#             "strawberries_on_plate": len(self.placed_strawberries),
+#             "task_progress": len(self.placed_strawberries) / 3.0,
+#             "held_object": self.held_object,
+#             "current_step": self.current_step
+#         }
+
+#     def start_episode_recording(self, episode_id: int):
+#         if self.video_recorder:
+#             return self.video_recorder.start_episode_recording(
+#                 episode_id, f"strawberry_{self.robot_name.lower()}"
+#             )
+
+#     def stop_episode_recording(self):
+#         if self.video_recorder:
+#             self.video_recorder.stop_episode_recording()
+
+#     def close(self):
+#         if self.video_recorder:
+#             self.video_recorder.cleanup()
+#         if hasattr(self, 'env'):
+#             self.env.close()
+
+
+# class RoboSuiteGR00TAdapter:
+#     def __init__(self, robot_dof: int):
+#         self.robot_dof = robot_dof
+    
+#     def robosuite_to_groot_obs(self, obs: dict, task_desc: str) -> dict:
+#         joint_pos = obs.get("robot0_joint_pos")
+#         if joint_pos is None:
+#             joint_pos = np.zeros(self.robot_dof)
+        
+#         if len(joint_pos) != self.robot_dof:
+#             padded = np.zeros(self.robot_dof)
+#             min_len = min(len(joint_pos), self.robot_dof)
+#             padded[:min_len] = joint_pos[:min_len]
+#             joint_pos = padded
+        
+#         gripper_pos = obs.get("robot0_gripper_qpos")
+        
+#         # 修复夹爪数据处理
+#         if gripper_pos is not None:
+#             # 检查是否为数组
+#             if hasattr(gripper_pos, '__len__') and not isinstance(gripper_pos, (int, float)):
+#                 if len(gripper_pos) > 0:
+#                     gripper_norm = np.mean(gripper_pos)  # Panda有两个夹爪关节
+#                 else:
+#                     gripper_norm = 0.0
+#             else:
+#                 # 单个标量值
+#                 gripper_norm = float(gripper_pos)
+            
+#             # Panda夹爪归一化：范围约为[-0.04, 0.04]
+#             if self.robot_dof == 7:  # Panda机器人
+#                 gripper_norm = (gripper_norm + 0.04) / 0.08
+#             else:  # SO100或其他
+#                 gripper_norm = np.abs(gripper_norm)  # 简单处理
+#         else:
+#             gripper_norm = 0.0
+        
+#         gripper_norm = np.clip(gripper_norm, 0, 1)
+        
+#         return {
+#             "video.webcam": obs.get("frontview_image", np.zeros((480, 640, 3), np.uint8))[np.newaxis, ...],
+#             "state.single_arm": joint_pos[np.newaxis, :].astype(np.float32),
+#             "state.gripper": np.array([[gripper_norm]], dtype=np.float32),
+#             "annotation.human.task_description": [task_desc]
+#         }
+
+#     def groot_to_robosuite_action(self, groot_action: dict) -> np.ndarray:
+#         vec = groot_action.get('world_vector', np.zeros((1, 3)))[0]
+#         rot = groot_action.get('rotation_delta', np.zeros((1, 3)))[0]
+#         grip = groot_action.get('gripper_closedness_action', np.zeros((1, 1)))[0][0]
+#         return np.concatenate([vec, rot, [grip]]).astype(np.float32)
+
+
+# class GR00TClient:
+#     def __init__(self, config: ExperimentConfig, robot_dof: int):
+#         self.config = config
+#         self.adapter = RoboSuiteGR00TAdapter(robot_dof)
+#         self.client = None
+#         self.is_connected = self._connect()
+
+#     def _connect(self) -> bool:
+#         try:
+#             print(f"🔗 正在连接到GR00T服务: {self.config.groot_host}:{self.config.groot_port}...")
+#             self.client = RobotInferenceClient(host=self.config.groot_host, port=self.config.groot_port)
+#             # 测试连接
+#             test_obs = self.adapter.robosuite_to_groot_obs({}, "test")
+#             self.client.get_action(test_obs)
+#             print("✅ GR00T连接成功！")
+#             return True
+#         except Exception as e:
+#             print(f"❌ GR00T连接失败: {e}")
+#             print("💡 将在测试模式下运行...")
+#             return False
+
+#     def get_action(self, obs, task_desc):
+#         if not self.is_connected:
+#             return None
+#         try:
+#             groot_obs = self.adapter.robosuite_to_groot_obs(obs, task_desc)
+#             groot_action = self.client.get_action(groot_obs)
+#             return self.adapter.groot_to_robosuite_action(groot_action) if groot_action else None
+#         except Exception as e:
+#             # 更详细的错误信息
+#             if "no len()" in str(e):
+#                 print(f"⚠️ 夹爪数据类型错误: {e}")
+#                 gripper_qpos = obs.get('robot0_gripper_qpos')
+#                 print(f"   夹爪原始数据: {gripper_qpos} (类型: {type(gripper_qpos)})")
+#             else:
+#                 print(f"⚠️ GR00T动作生成失败: {e}")
+#             return None
+
+
+# class StrawberryPickPlaceInterface:
+#     def __init__(self, config: ExperimentConfig):
+#         self.config = config
+#         self.env = StrawberryPickPlaceEnvironment(config)
+#         self.groot_client = GR00TClient(config, self.env.actual_robot_dof)
+
+#     def run_experiment(self):
+#         task_description = "Pick up the red strawberries and place them on the white plate. There are green balls on the table that should be avoided."
+        
+#         # 如果GR00T不可用，运行测试模式
+#         if not self.groot_client.is_connected:
+#             print("🧪 运行环境测试模式（使用随机动作）...")
+#             self._run_test_mode()
+#             return
+
+#         print("🚀 开始GR00T控制的草莓拣选实验...")
+        
+#         for i in range(self.config.num_episodes):
+#             print(f"\n🎯 Episode {i + 1}/{self.config.num_episodes}")
+#             if self.config.enable_video_recording:
+#                 self.env.start_episode_recording(i)
+            
+#             obs, done, step_count = self.env.reset(), False, 0
+#             episode_reward = 0.0
+            
+#             while not done:
+#                 action = self.groot_client.get_action(obs, task_description)
+#                 if action is None:
+#                     # 如果GR00T失败，使用小幅度随机动作
+#                     action = np.random.normal(0, 0.05, self.env.action_dim)
+#                     print("x", end="", flush=True)
+#                 else:
+#                     print(".", end="", flush=True)
+
+#                 obs, reward, done, info = self.env.step(action)
+#                 episode_reward += reward
+#                 step_count += 1
+                
+#                 if step_count % 50 == 0:
+#                     print(f" [步数:{step_count}]", end="", flush=True)
+            
+#             success = info.get('task_success', False)
+#             print(f"\n📊 Episode {i+1} 结果:")
+#             print(f"   步数: {step_count}")
+#             print(f"   总奖励: {episode_reward:.2f}")
+#             print(f"   成功: {'✅' if success else '❌'}")
+#             print(f"   草莓数: {info.get('strawberries_on_plate', 0)}/3")
+            
+#             if self.config.enable_video_recording:
+#                 self.env.stop_episode_recording()
+        
+#         self.close()
+
+#     def _run_test_mode(self):
+#         """测试模式：使用随机动作验证环境"""
+#         print("\n🧪 环境测试模式启动...")
+        
+#         for i in range(1):  # 只运行一个episode测试
+#             print(f"\n🎯 测试 Episode {i + 1}")
+#             if self.config.enable_video_recording:
+#                 self.env.start_episode_recording(i)
+            
+#             obs, done, step_count = self.env.reset(), False, 0
+#             episode_reward = 0.0
+            
+#             print("📍 初始状态信息:")
+#             print(f"   机器人末端位置: {obs.get('robot0_eef_pos')}")
+#             gripper_qpos = obs.get('robot0_gripper_qpos')
+#             print(f"   夹爪状态: {gripper_qpos} (类型: {type(gripper_qpos)})")
+#             if gripper_qpos is not None and hasattr(gripper_qpos, '__len__'):
+#                 print(f"   夹爪长度: {len(gripper_qpos) if hasattr(gripper_qpos, '__len__') else 'scalar'}")
+#             joint_pos = obs.get('robot0_joint_pos')
+#             print(f"   关节位置: {joint_pos} (DOF: {len(joint_pos) if joint_pos is not None else 'None'})")
+#             print(f"   图像形状: {obs.get('frontview_image', np.array([])).shape}")
+            
+#             while not done and step_count < 100:  # 限制测试步数
+#                 # 生成安全的随机动作（小幅度）
+#                 action = np.random.normal(0, 0.02, self.env.action_dim)
+#                 action = np.clip(action, -0.05, 0.05)  # 限制动作幅度
+                
+#                 obs, reward, done, info = self.env.step(action)
+#                 episode_reward += reward
+#                 step_count += 1
+                
+#                 if step_count % 20 == 0:
+#                     print(f"步数: {step_count}, 奖励: {reward:.3f}, 总奖励: {episode_reward:.2f}")
+#                     if info.get('held_object'):
+#                         print(f"   抓取状态: {info['held_object']}")
+            
+#             print(f"\n📊 测试完成:")
+#             print(f"   总步数: {step_count}")
+#             print(f"   总奖励: {episode_reward:.2f}")
+#             print(f"   任务进度: {info.get('task_progress', 0):.1%}")
+            
+#             if self.config.enable_video_recording:
+#                 self.env.stop_episode_recording()
+
+#     def close(self):
+#         self.env.close()
+#         print("\n🔚 实验接口已关闭。")
+
+
+# def main():
+#     print("=" * 70)
+#     print("🍓 RoboSuite-GR00T草莓拣选接口 (兼容性修复版) 🍓")
+#     print("=" * 70)
+    
+#     try:
+#         # 选择机器人（默认使用更稳定的Panda）
+#         try:
+#             choice = input("🤖 选择机器人 [1] Panda (推荐) [2] SO100 (默认: 1): ").strip()
+#             robot_type = "SO100" if choice == '2' else "Panda"
+#         except (EOFError, KeyboardInterrupt):
+#             robot_type = "Panda"
+        
+#         print(f"🤖 使用机器人: {robot_type}")
+        
+#         # 创建配置
+#         config = ExperimentConfig(
+#             robot=robot_type,
+#             video_output_dir=f"./strawberry_{robot_type.lower()}_videos",
+#             enable_gui=False,     # 启用GUI观察
+#             num_episodes=1       # 测试用，只运行1个episode
+#         )
+        
+#         print(f"\n🛠️ 实验配置:")
+#         print(f"   机器人: {config.robot}")
+#         print(f"   Episodes: {config.num_episodes}")
+#         print(f"   GUI: {'✅' if config.enable_gui else '❌'}")
+#         print(f"   视频录制: {'✅' if config.enable_video_recording else '❌'}")
+#         print(f"   输出目录: {config.video_output_dir}")
+#         print()
+
+#         # 运行实验
+#         interface = StrawberryPickPlaceInterface(config)
+#         interface.run_experiment()
+        
+#         print("\n🎉 实验完成！检查视频文件查看结果。")
+        
+#     except KeyboardInterrupt:
+#         print("\n⏹️ 用户中断实验")
+#     except Exception as e:
+#         print(f"\n❌ 程序执行出错: {e}")
+#         import traceback
+#         traceback.print_exc()
+#         print("\n💡 调试建议:")
+#         print("   1. 确认robosuite版本兼容性")
+#         print("   2. 检查机器人模型注册状态")  
+#         print("   3. 尝试使用Panda机器人")
+#         print("   4. 检查MuJoCo环境设置")
+
+
+# if __name__ == "__main__":
+#     main()
+
 
 import os
 import sys
-import time
-import json
 import numpy as np
 import cv2
 from pathlib import Path
@@ -3328,16 +3946,13 @@ from datetime import datetime
 os.environ.setdefault('MUJOCO_GL', 'egl')
 os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')
 
-# 导入检查
 try:
     import robosuite
     from robosuite.controllers import load_composite_controller_config
-    from robosuite.utils.placement_samplers import UniformRandomSampler
-    ROBOSUITE_AVAILABLE = True
     print("✅ RoboSuite可用")
 except ImportError as e:
     print(f"❌ RoboSuite不可用: {e}")
-    ROBOSUITE_AVAILABLE = False
+    sys.exit(1)
 
 try:
     from gr00t.eval.robot import RobotInferenceClient
@@ -3400,32 +4015,36 @@ class VideoRecorder:
 
 @dataclass
 class ExperimentConfig:
-    robot: str = "Panda"  # 改为Panda，更稳定
+    robot: str = "Panda"
     num_episodes: int = 3
     max_steps_per_episode: int = 250
-    enable_gui: bool = False  # 启用GUI观察
+    enable_gui: bool = False
     enable_video_recording: bool = True
     video_output_dir: str = "./strawberry_videos"
     groot_host: str = "localhost"
     groot_port: int = 5555
 
 
-class StrawberryPickPlaceEnvironment:
+class SimpleStrawberryEnvironment:
+    """简化版草莓环境 - 使用现有PickPlace + 虚拟对象逻辑"""
+    
     def __init__(self, config: ExperimentConfig):
         self.config = config
         self.robot_name = config.robot
-        print(f"🤖 正在为 {self.robot_name} 创建环境...")
+        print(f"🤖 正在创建简化版草莓环境 (机器人: {self.robot_name})...")
         self.video_recorder = VideoRecorder(output_dir=config.video_output_dir, fps=20) if config.enable_video_recording else None
-        self.held_object, self.placed_strawberries, self.task_complete, self.current_step = None, set(), False, 0
+
+        # 任务状态
+        self.held_object = None
+        self.placed_strawberries = set()
+        self.task_complete = False
+        self.current_step = 0
 
         try:
-            from robosuite.controllers import load_composite_controller_config
-
-            # 使用稳定的PickPlace环境
             controller_config = load_composite_controller_config(robot=self.robot_name)
             print(f"🎛️ 加载控制器配置 for robot: {self.robot_name}")
 
-            # 创建环境 - 使用多物体模式
+            # 使用标准PickPlace环境
             self.env = robosuite.make(
                 "PickPlace",
                 robots=self.robot_name,
@@ -3433,116 +4052,77 @@ class StrawberryPickPlaceEnvironment:
                 has_renderer=config.enable_gui,
                 has_offscreen_renderer=config.enable_video_recording or not config.enable_gui,
                 use_camera_obs=True,
-                camera_names=["frontview", "agentview"],  # 多个视角
+                camera_names=["frontview", "agentview"],
                 camera_heights=480,
                 camera_widths=640,
                 control_freq=20,
                 horizon=config.max_steps_per_episode,
                 ignore_done=True,
-                single_object_mode=0,  # 允许多个对象
-                object_type="milk",    # 使用milk对象作为"盘子"
+                single_object_mode=0,
+                object_type="milk",
                 reward_shaping=True,
             )
             
             self.robot_model = self.env.robots[0]
             self.actual_robot_dof, self.action_dim = self.robot_model.dof, self.robot_model.action_dim
-            print(f"   - 实际机器人: {type(self.robot_model).__name__}, DOF: {self.actual_robot_dof}, 动作维度: {self.action_dim}")
+            print(f"   - 机器人: {type(self.robot_model).__name__}, DOF: {self.actual_robot_dof}, 动作维度: {self.action_dim}")
             
-            # 获取环境的实际信息
-            self._get_environment_info()
-            self._setup_custom_task()
-            print(f"✅ Robosuite 环境创建成功，已设置自定义草莓任务。")
+            self._setup_virtual_objects()
+            print("✅ 简化版草莓环境创建成功!")
             
         except Exception as e:
             print(f"❌ 环境创建失败: {e}"); import traceback; traceback.print_exc(); raise
 
-    def _get_environment_info(self):
-        """获取环境的实际信息"""
-        # 重置环境获取初始状态
+    def _setup_virtual_objects(self):
+        """设置虚拟草莓、绿球和盘子的位置"""
+        # 获取机器人初始位置
         initial_obs = self.env.reset()
+        eef_pos = initial_obs.get("robot0_eef_pos", np.array([0, 0, 0.8]))
         
-        # 获取机器人末端执行器位置
-        if "robot0_eef_pos" in initial_obs:
-            self.robot_eef_pos = initial_obs["robot0_eef_pos"]
-            print(f"🔍 机器人末端位置: {self.robot_eef_pos}")
-        else:
-            self.robot_eef_pos = np.array([0.5, 0, 1.0])  # 默认值
+        # 工作面高度：机器人末端位置基础上调整
+        work_height = eef_pos[2] + 0.05  # 比末端高5cm
         
-        # 尝试获取桌子信息
-        try:
-            self.table_offset = self.env.table_offset
-            print(f"🔍 桌子偏移: {self.table_offset}")
-        except AttributeError:
-            # 基于机器人位置推算桌子位置
-            robot_base_z = self.robot_eef_pos[2]
-            # 如果机器人在地面，桌子高度设为合理值
-            if robot_base_z < 0.5:
-                table_z = robot_base_z + 0.8  # 桌子比机器人基座高0.8米
-            else:
-                table_z = robot_base_z + 0.1   # 机器人已经在合理高度
-            
-            self.table_offset = np.array([self.robot_eef_pos[0], self.robot_eef_pos[1], table_z])
-            print(f"🔍 推算桌子位置: {self.table_offset}")
-            print(f"🔍 机器人到桌面距离: {table_z - robot_base_z:.3f}m")
-
-    def _setup_custom_task(self):
-        """设置自定义草莓任务的虚拟对象位置"""
-        # 基于机器人实际位置设置虚拟对象
-        robot_x, robot_y, robot_z = self.robot_eef_pos
+        # 在机器人前方设置虚拟对象
+        base_x, base_y = eef_pos[0], eef_pos[1]
         
-        # 工作台面应该在机器人末端附近（稍微高一点）
-        work_surface_z = robot_z + 0.05  # 比机器人末端高5cm
-        
-        # 盘子位置（在机器人前方）
-        self.virtual_plate_pos = np.array([robot_x + 0.2, robot_y - 0.1, work_surface_z])
-        
-        # 三个草莓的位置（围绕机器人可达范围）
-        self.virtual_strawberry_positions = [
-            np.array([robot_x + 0.1, robot_y + 0.1, work_surface_z]),   # 右前
-            np.array([robot_x - 0.1, robot_y + 0.1, work_surface_z]),   # 左前
-            np.array([robot_x, robot_y + 0.15, work_surface_z])         # 正前
+        # 草莓位置（前方三角形分布）
+        self.strawberry_positions = [
+            np.array([base_x + 0.1, base_y + 0.1, work_height]),   # 右前
+            np.array([base_x - 0.1, base_y + 0.1, work_height]),   # 左前
+            np.array([base_x, base_y + 0.15, work_height])         # 正前
         ]
         
-        # 四个绿色小球的位置（分散但在可达范围内）
-        self.virtual_green_balls = [
-            np.array([robot_x + 0.15, robot_y + 0.05, work_surface_z]), # 右近
-            np.array([robot_x - 0.15, robot_y + 0.05, work_surface_z]), # 左近
-            np.array([robot_x + 0.05, robot_y + 0.2, work_surface_z]),  # 右远
-            np.array([robot_x - 0.05, robot_y + 0.2, work_surface_z])   # 左远
+        # 绿球位置（四周分布）
+        self.green_ball_positions = [
+            np.array([base_x + 0.15, base_y + 0.05, work_height]), # 右近
+            np.array([base_x - 0.15, base_y + 0.05, work_height]), # 左近
+            np.array([base_x + 0.05, base_y + 0.2, work_height]),  # 右远
+            np.array([base_x - 0.05, base_y + 0.2, work_height])   # 左远
         ]
         
-        print(f"🍓 虚拟草莓位置: {len(self.virtual_strawberry_positions)} 个")
-        for i, pos in enumerate(self.virtual_strawberry_positions):
-            dist = np.linalg.norm(pos - self.robot_eef_pos)
-            print(f"   草莓{i}: {pos} (距离机器人: {dist:.3f}m)")
-            
-        print(f"🟢 虚拟绿球位置: {len(self.virtual_green_balls)} 个") 
-        print(f"🍽️ 虚拟盘子位置: {self.virtual_plate_pos}")
+        # 盘子位置（右前方）
+        self.plate_position = np.array([base_x + 0.2, base_y - 0.1, work_height])
         
-        plate_dist = np.linalg.norm(self.virtual_plate_pos - self.robot_eef_pos)
-        print(f"📏 盘子距离机器人: {plate_dist:.3f}m")
-        
-        # 打印位置信息用于调试
-        print(f"📍 机器人末端: {self.robot_eef_pos}")
-        print(f"📍 工作表面高度: {work_surface_z:.3f}m")
+        print(f"🍓 设置 {len(self.strawberry_positions)} 个虚拟草莓位置")
+        print(f"🟢 设置 {len(self.green_ball_positions)} 个虚拟绿球位置")  
+        print(f"🍽️ 设置虚拟盘子位置: {self.plate_position}")
+        print(f"📏 工作面高度: {work_height:.3f}m")
+        print(f"🤖 机器人末端: {eef_pos}")
 
     def reset(self):
         obs = self.env.reset()
-        self.current_step, self.held_object, self.task_complete = 0, None, False
+        self.current_step = 0
+        self.held_object = None
         self.placed_strawberries.clear()
-        
-        # 重新获取环境信息（因为重置可能改变位置）
-        self._get_environment_info()
-        self._setup_custom_task()
-        
+        self.task_complete = False
         return self._process_observation(obs)
 
     def step(self, action):
         obs, env_reward, done, info = self.env.step(action)
         self.current_step += 1
         
-        # 计算自定义任务奖励
-        task_reward = self._calculate_strawberry_reward(obs)
+        # 计算虚拟草莓任务奖励
+        task_reward = self._calculate_virtual_reward(obs)
         
         # 任务成功条件
         task_success = len(self.placed_strawberries) == 3
@@ -3551,22 +4131,21 @@ class StrawberryPickPlaceEnvironment:
         processed_obs = self._process_observation(obs)
         info.update(self.get_task_info())
         
-        # 录制视频帧
+        # 录制视频
         if self.video_recorder and self.video_recorder.is_recording:
             info_for_video = {
                 'step': self.current_step,
                 'reward': task_reward,
                 'task_progress': info['task_progress'],
                 'strawberries_on_plate': info['strawberries_on_plate'],
-                'task_success': task_success,
-                'env_reward': env_reward  # 也显示环境原始奖励
+                'task_success': task_success
             }
             self.video_recorder.add_frame(processed_obs["frontview_image"], info_for_video)
         
         return processed_obs, task_reward, done, info
 
-    def _calculate_strawberry_reward(self, obs):
-        """计算基于虚拟草莓拣选任务的奖励"""
+    def _calculate_virtual_reward(self, obs):
+        """计算基于虚拟对象的奖励"""
         reward = 0.0
         eef_pos = obs.get("robot0_eef_pos")
         gripper_qpos = obs.get("robot0_gripper_qpos")
@@ -3574,63 +4153,58 @@ class StrawberryPickPlaceEnvironment:
         if eef_pos is None or gripper_qpos is None:
             return 0.0
         
-        # 修复夹爪状态处理
-        if hasattr(gripper_qpos, '__len__') and not isinstance(gripper_qpos, (int, float)):
-            if len(gripper_qpos) > 0:
-                gripper_normalized = np.mean(gripper_qpos)  # Panda有两个夹爪joint
-                gripper_normalized = (gripper_normalized + 0.04) / 0.08  # Panda夹爪范围约为[-0.04, 0.04]
-            else:
-                gripper_normalized = 0.0
-        else:
-            # 单个标量值
-            gripper_normalized = float(gripper_qpos)
+        # 处理夹爪状态
+        if hasattr(gripper_qpos, '__len__') and len(gripper_qpos) > 0:
+            gripper_norm = np.mean(gripper_qpos)
             if self.robot_name == "Panda":
-                gripper_normalized = (gripper_normalized + 0.04) / 0.08
-            else:
-                gripper_normalized = np.abs(gripper_normalized)
+                gripper_norm = (gripper_norm + 0.04) / 0.08
+            else:  # SO100
+                gripper_norm = np.abs(gripper_norm)
+        else:
+            gripper_norm = np.abs(float(gripper_qpos))
         
-        gripper_normalized = np.clip(gripper_normalized, 0, 1)
-
+        gripper_norm = np.clip(gripper_norm, 0, 1)
+        
         # 如果没有抓取物体，奖励接近草莓
         if self.held_object is None:
-            available_strawberries = [i for i in range(len(self.virtual_strawberry_positions)) 
+            available_strawberries = [i for i in range(len(self.strawberry_positions)) 
                                     if i not in self.placed_strawberries]
             
             if available_strawberries:
-                distances = [np.linalg.norm(eef_pos - self.virtual_strawberry_positions[i]) 
+                distances = [np.linalg.norm(eef_pos - self.strawberry_positions[i]) 
                            for i in available_strawberries]
                 min_dist = min(distances)
                 closest_idx = available_strawberries[np.argmin(distances)]
                 
-                # 接近草莓的奖励
+                # 接近奖励
                 reward += 2.0 * (1.0 - np.tanh(3.0 * min_dist))
                 
-                # 抓取条件：距离很近且夹爪闭合
-                if min_dist < 0.08 and gripper_normalized < 0.3:
+                # 抓取条件
+                if min_dist < 0.06 and gripper_norm < 0.3:
                     self.held_object = f"strawberry_{closest_idx}"
                     reward += 20.0
-                    print(f"   🍓 虚拟抓取草莓 {closest_idx}! (距离:{min_dist:.3f}, 夹爪:{gripper_normalized:.3f})")
+                    print(f"   🍓 虚拟抓取草莓 {closest_idx}! (距离:{min_dist:.3f})")
         
         # 如果抓取了物体，奖励移动到盘子
         else:
-            dist_to_plate = np.linalg.norm(eef_pos - self.virtual_plate_pos)
+            dist_to_plate = np.linalg.norm(eef_pos - self.plate_position)
             
-            # 接近盘子的奖励
+            # 接近盘子奖励
             reward += 2.0 * (1.0 - np.tanh(3.0 * dist_to_plate))
             
-            # 放置条件：接近盘子且夹爪打开
-            if dist_to_plate < 0.1 and gripper_normalized > 0.7:
+            # 放置条件
+            if dist_to_plate < 0.08 and gripper_norm > 0.7:
                 strawberry_idx = int(self.held_object.split('_')[-1])
                 self.placed_strawberries.add(strawberry_idx)
                 self.held_object = None
                 reward += 30.0
-                print(f"   🍽️ 虚拟放置草莓! ({len(self.placed_strawberries)}/3) (距离:{dist_to_plate:.3f}, 夹爪:{gripper_normalized:.3f})")
+                print(f"   🍽️ 虚拟放置草莓! ({len(self.placed_strawberries)}/3)")
         
-        # 完成任务的额外奖励
+        # 任务完成奖励
         if len(self.placed_strawberries) == 3 and not self.task_complete:
             reward += 100.0
             self.task_complete = True
-            print("\n🎉 虚拟草莓拣选任务成功!")
+            print("\n🎉 虚拟草莓任务成功!")
         
         return reward
 
@@ -3638,29 +4212,21 @@ class StrawberryPickPlaceEnvironment:
         """处理观测数据"""
         def process_image(img):
             if img is not None:
-                # 确保图像是正确的格式
                 if img.dtype != np.uint8:
                     img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
-                # RoboSuite图像可能需要翻转
                 return img[::-1]
             else:
                 return np.zeros((480, 640, 3), np.uint8)
         
-        processed_obs = {
+        return {
             "frontview_image": process_image(obs.get("frontview_image")),
+            "agentview_image": process_image(obs.get("agentview_image")),
             "robot0_joint_pos": obs.get("robot0_joint_pos"),
             "robot0_gripper_qpos": obs.get("robot0_gripper_qpos"),
             "robot0_eef_pos": obs.get("robot0_eef_pos"),
         }
-        
-        # 添加agentview如果可用
-        if "agentview_image" in obs:
-            processed_obs["agentview_image"] = process_image(obs.get("agentview_image"))
-        
-        return processed_obs
 
     def get_task_info(self):
-        """获取任务信息"""
         return {
             "task_success": self.task_complete,
             "strawberries_on_plate": len(self.placed_strawberries),
@@ -3671,19 +4237,14 @@ class StrawberryPickPlaceEnvironment:
 
     def start_episode_recording(self, episode_id: int):
         if self.video_recorder:
-            return self.video_recorder.start_episode_recording(
-                episode_id, f"strawberry_{self.robot_name.lower()}"
-            )
+            return self.video_recorder.start_episode_recording(episode_id, f"simple_strawberry_{self.robot_name.lower()}")
 
     def stop_episode_recording(self):
-        if self.video_recorder:
-            self.video_recorder.stop_episode_recording()
+        if self.video_recorder: self.video_recorder.stop_episode_recording()
 
     def close(self):
-        if self.video_recorder:
-            self.video_recorder.cleanup()
-        if hasattr(self, 'env'):
-            self.env.close()
+        if self.video_recorder: self.video_recorder.cleanup()
+        if hasattr(self, 'env'): self.env.close()
 
 
 class RoboSuiteGR00TAdapter:
@@ -3692,8 +4253,7 @@ class RoboSuiteGR00TAdapter:
     
     def robosuite_to_groot_obs(self, obs: dict, task_desc: str) -> dict:
         joint_pos = obs.get("robot0_joint_pos")
-        if joint_pos is None:
-            joint_pos = np.zeros(self.robot_dof)
+        if joint_pos is None: joint_pos = np.zeros(self.robot_dof)
         
         if len(joint_pos) != self.robot_dof:
             padded = np.zeros(self.robot_dof)
@@ -3702,24 +4262,16 @@ class RoboSuiteGR00TAdapter:
             joint_pos = padded
         
         gripper_pos = obs.get("robot0_gripper_qpos")
-        
-        # 修复夹爪数据处理
         if gripper_pos is not None:
-            # 检查是否为数组
             if hasattr(gripper_pos, '__len__') and not isinstance(gripper_pos, (int, float)):
-                if len(gripper_pos) > 0:
-                    gripper_norm = np.mean(gripper_pos)  # Panda有两个夹爪关节
-                else:
-                    gripper_norm = 0.0
+                gripper_norm = np.mean(gripper_pos) if len(gripper_pos) > 0 else 0.0
             else:
-                # 单个标量值
                 gripper_norm = float(gripper_pos)
             
-            # Panda夹爪归一化：范围约为[-0.04, 0.04]
-            if self.robot_dof == 7:  # Panda机器人
+            if self.robot_dof == 7:  # Panda
                 gripper_norm = (gripper_norm + 0.04) / 0.08
-            else:  # SO100或其他
-                gripper_norm = np.abs(gripper_norm)  # 简单处理
+            else:  # SO100
+                gripper_norm = np.abs(gripper_norm)
         else:
             gripper_norm = 0.0
         
@@ -3748,53 +4300,41 @@ class GR00TClient:
 
     def _connect(self) -> bool:
         try:
-            print(f"🔗 正在连接到GR00T服务: {self.config.groot_host}:{self.config.groot_port}...")
+            print(f"🔗 连接GR00T服务: {self.config.groot_host}:{self.config.groot_port}...")
             self.client = RobotInferenceClient(host=self.config.groot_host, port=self.config.groot_port)
-            # 测试连接
             test_obs = self.adapter.robosuite_to_groot_obs({}, "test")
             self.client.get_action(test_obs)
             print("✅ GR00T连接成功！")
             return True
         except Exception as e:
             print(f"❌ GR00T连接失败: {e}")
-            print("💡 将在测试模式下运行...")
             return False
 
     def get_action(self, obs, task_desc):
-        if not self.is_connected:
-            return None
+        if not self.is_connected: return None
         try:
             groot_obs = self.adapter.robosuite_to_groot_obs(obs, task_desc)
             groot_action = self.client.get_action(groot_obs)
             return self.adapter.groot_to_robosuite_action(groot_action) if groot_action else None
         except Exception as e:
-            # 更详细的错误信息
-            if "no len()" in str(e):
-                print(f"⚠️ 夹爪数据类型错误: {e}")
-                gripper_qpos = obs.get('robot0_gripper_qpos')
-                print(f"   夹爪原始数据: {gripper_qpos} (类型: {type(gripper_qpos)})")
-            else:
-                print(f"⚠️ GR00T动作生成失败: {e}")
+            print(f"⚠️ GR00T动作失败: {e}")
             return None
 
 
-class StrawberryPickPlaceInterface:
+class SimpleStrawberryInterface:
     def __init__(self, config: ExperimentConfig):
         self.config = config
-        self.env = StrawberryPickPlaceEnvironment(config)
+        self.env = SimpleStrawberryEnvironment(config)
         self.groot_client = GR00TClient(config, self.env.actual_robot_dof)
 
     def run_experiment(self):
-        task_description = "Pick up the red strawberries and place them on the white plate. There are green balls on the table that should be avoided."
+        task_description = "Pick up the virtual red strawberries and place them on the virtual white plate."
         
-        # 如果GR00T不可用，运行测试模式
         if not self.groot_client.is_connected:
-            print("🧪 运行环境测试模式（使用随机动作）...")
+            print("🧪 运行测试模式...")
             self._run_test_mode()
             return
 
-        print("🚀 开始GR00T控制的草莓拣选实验...")
-        
         for i in range(self.config.num_episodes):
             print(f"\n🎯 Episode {i + 1}/{self.config.num_episodes}")
             if self.config.enable_video_recording:
@@ -3806,7 +4346,6 @@ class StrawberryPickPlaceInterface:
             while not done:
                 action = self.groot_client.get_action(obs, task_description)
                 if action is None:
-                    # 如果GR00T失败，使用小幅度随机动作
                     action = np.random.normal(0, 0.05, self.env.action_dim)
                     print("x", end="", flush=True)
                 else:
@@ -3821,10 +4360,8 @@ class StrawberryPickPlaceInterface:
             
             success = info.get('task_success', False)
             print(f"\n📊 Episode {i+1} 结果:")
-            print(f"   步数: {step_count}")
-            print(f"   总奖励: {episode_reward:.2f}")
-            print(f"   成功: {'✅' if success else '❌'}")
-            print(f"   草莓数: {info.get('strawberries_on_plate', 0)}/3")
+            print(f"   步数: {step_count}, 奖励: {episode_reward:.2f}")
+            print(f"   成功: {'✅' if success else '❌'}, 草莓: {info.get('strawberries_on_plate', 0)}/3")
             
             if self.config.enable_video_recording:
                 self.env.stop_episode_recording()
@@ -3832,10 +4369,9 @@ class StrawberryPickPlaceInterface:
         self.close()
 
     def _run_test_mode(self):
-        """测试模式：使用随机动作验证环境"""
-        print("\n🧪 环境测试模式启动...")
+        print("\n🧪 简化环境测试模式...")
         
-        for i in range(1):  # 只运行一个episode测试
+        for i in range(1):
             print(f"\n🎯 测试 Episode {i + 1}")
             if self.config.enable_video_recording:
                 self.env.start_episode_recording(i)
@@ -3843,91 +4379,60 @@ class StrawberryPickPlaceInterface:
             obs, done, step_count = self.env.reset(), False, 0
             episode_reward = 0.0
             
-            print("📍 初始状态信息:")
-            print(f"   机器人末端位置: {obs.get('robot0_eef_pos')}")
-            gripper_qpos = obs.get('robot0_gripper_qpos')
-            print(f"   夹爪状态: {gripper_qpos} (类型: {type(gripper_qpos)})")
-            if gripper_qpos is not None and hasattr(gripper_qpos, '__len__'):
-                print(f"   夹爪长度: {len(gripper_qpos) if hasattr(gripper_qpos, '__len__') else 'scalar'}")
-            joint_pos = obs.get('robot0_joint_pos')
-            print(f"   关节位置: {joint_pos} (DOF: {len(joint_pos) if joint_pos is not None else 'None'})")
-            print(f"   图像形状: {obs.get('frontview_image', np.array([])).shape}")
+            print("📍 状态信息:")
+            print(f"   机器人末端: {obs.get('robot0_eef_pos')}")
+            print(f"   关节位置: {obs.get('robot0_joint_pos')}")
+            print(f"   夹爪状态: {obs.get('robot0_gripper_qpos')}")
+            print(f"   草莓位置: {self.env.strawberry_positions[0]}")  # 显示第一个草莓位置
             
-            while not done and step_count < 100:  # 限制测试步数
-                # 生成安全的随机动作（小幅度）
+            while not done and step_count < 100:
                 action = np.random.normal(0, 0.02, self.env.action_dim)
-                action = np.clip(action, -0.05, 0.05)  # 限制动作幅度
+                action = np.clip(action, -0.05, 0.05)
                 
                 obs, reward, done, info = self.env.step(action)
                 episode_reward += reward
                 step_count += 1
                 
                 if step_count % 20 == 0:
-                    print(f"步数: {step_count}, 奖励: {reward:.3f}, 总奖励: {episode_reward:.2f}")
+                    print(f"步数: {step_count}, 奖励: {reward:.3f}")
                     if info.get('held_object'):
                         print(f"   抓取状态: {info['held_object']}")
             
-            print(f"\n📊 测试完成:")
-            print(f"   总步数: {step_count}")
-            print(f"   总奖励: {episode_reward:.2f}")
-            print(f"   任务进度: {info.get('task_progress', 0):.1%}")
+            print(f"\n📊 测试完成: {step_count}步, 总奖励: {episode_reward:.2f}")
             
             if self.config.enable_video_recording:
                 self.env.stop_episode_recording()
 
     def close(self):
         self.env.close()
-        print("\n🔚 实验接口已关闭。")
+        print("🔚 简化环境已关闭")
 
 
 def main():
-    print("=" * 70)
-    print("🍓 RoboSuite-GR00T草莓拣选接口 (兼容性修复版) 🍓")
-    print("=" * 70)
+    print("🍓 简化版草莓拣选环境")
+    print("=" * 50)
     
     try:
-        # 选择机器人（默认使用更稳定的Panda）
-        try:
-            choice = input("🤖 选择机器人 [1] Panda (推荐) [2] SO100 (默认: 1): ").strip()
-            robot_type = "SO100" if choice == '2' else "Panda"
-        except (EOFError, KeyboardInterrupt):
-            robot_type = "Panda"
+        robot_type = input("🤖 选择机器人 [1] Panda [2] SO100 (默认: 1): ").strip()
+        robot_type = "SO100" if robot_type == '2' else "Panda"
         
-        print(f"🤖 使用机器人: {robot_type}")
-        
-        # 创建配置
         config = ExperimentConfig(
             robot=robot_type,
-            video_output_dir=f"./strawberry_{robot_type.lower()}_videos",
-            enable_gui=False,     # 启用GUI观察
-            num_episodes=1       # 测试用，只运行1个episode
+            video_output_dir=f"./simple_strawberry_{robot_type.lower()}",
+            num_episodes=1
         )
         
-        print(f"\n🛠️ 实验配置:")
-        print(f"   机器人: {config.robot}")
-        print(f"   Episodes: {config.num_episodes}")
-        print(f"   GUI: {'✅' if config.enable_gui else '❌'}")
-        print(f"   视频录制: {'✅' if config.enable_video_recording else '❌'}")
-        print(f"   输出目录: {config.video_output_dir}")
-        print()
-
-        # 运行实验
-        interface = StrawberryPickPlaceInterface(config)
+        print(f"\n🛠️ 配置: 机器人={config.robot}, Episodes={config.num_episodes}")
+        
+        interface = SimpleStrawberryInterface(config)
         interface.run_experiment()
         
-        print("\n🎉 实验完成！检查视频文件查看结果。")
+        print("\n🎉 简化环境实验完成!")
         
-    except KeyboardInterrupt:
-        print("\n⏹️ 用户中断实验")
     except Exception as e:
-        print(f"\n❌ 程序执行出错: {e}")
+        print(f"\n❌ 错误: {e}")
         import traceback
         traceback.print_exc()
-        print("\n💡 调试建议:")
-        print("   1. 确认robosuite版本兼容性")
-        print("   2. 检查机器人模型注册状态")  
-        print("   3. 尝试使用Panda机器人")
-        print("   4. 检查MuJoCo环境设置")
 
 
 if __name__ == "__main__":
